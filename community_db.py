@@ -44,12 +44,29 @@ HAMMING_THRESHOLD = int(os.environ.get("SIMHASH_HAMMING", "3"))
 # ---------------------------------------------------------------------------
 # Remove: phone numbers, account numbers, IBANs, OTPs, currency amounts,
 # Arabic name-after-honorific patterns. Goal is the residual "template".
+#
+# IMPORTANT: these regexes run AFTER preprocess_arabic, which normalizes
+# ة → ه, أإآٱ → ا, ى → ي, and strips diacritics. So the honorific list
+# below has to use the post-normalized forms.
 _PHONE_RE = re.compile(r"(?:\+?\d[\d\-\s]{6,}\d)")
 _IBAN_RE = re.compile(r"\b[A-Z]{2}\d{2}[A-Z0-9]{10,30}\b", re.IGNORECASE)
-_AMOUNT_RE = re.compile(r"\b\d{1,3}(?:[,\.]\d{3})*(?:[\.,]\d{1,2})?\s*(?:₪|شيكل|دولار|دينار|\$|€|usd|jod|ils)?", re.IGNORECASE)
-_OTP_RE = re.compile(r"\b\d{4,8}\b")
+# `\d+` (not `\d{1,3}`) so 4+ digit amounts like 5000, 7500 get fully eaten
+# whether or not they have a thousands-separator.
+_AMOUNT_RE = re.compile(
+    r"\b\d+(?:[,\.]\d+)*\s*(?:₪|شيكل|دولار|دينار|\$|€|usd|jod|ils)?",
+    re.IGNORECASE,
+)
+_OTP_RE = re.compile(r"\b\d{2,}\b")  # any leftover digit run >=2
 _NAME_AFTER_HONORIFIC = re.compile(
-    r"(?:عزيزي|عزيزتي|السيد|السيدة|الأستاذ|الأخ|الأخت)\s+\S+",
+    # Both pre-normalized and post-normalized forms — preprocess turns
+    # `السيدة` into `السيده` and `الأستاذ` into `الاستاذ` etc.
+    r"(?:"
+    r"عزيزي|عزيزتي|"
+    r"السيد|السيدة|السيده|"
+    r"الأستاذ|الاستاذ|"
+    r"الأخ|الاخ|"
+    r"الأخت|الاخت"
+    r")\s+\S+",
     re.IGNORECASE,
 )
 _URL_RE = re.compile(r"https?://\S+|www\.\S+", re.IGNORECASE)

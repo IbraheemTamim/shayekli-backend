@@ -578,6 +578,29 @@ def community_stats():
     return community_db.stats()
 
 
+@app.post("/community/debug-strip")
+async def community_debug_strip(payload: dict):
+    """
+    Visibility helper for the SimHash matching path. Returns the stripped
+    template + 64-bit hash + nearest stored neighbor's Hamming distance.
+    Useful when a near-duplicate fails to match and we need to see why.
+    """
+    text = (payload or {}).get("text") or ""
+    if not text:
+        raise HTTPException(status_code=400, detail="Text is required.")
+    template = community_db.strip_personal_data(text)
+    h = community_db.simhash(template)
+    match = community_db.lookup(text)
+    return {
+        "input": text,
+        "stripped_template": template,
+        "simhash": h,
+        "matched": match.matched,
+        "nearest_distance": match.distance,
+        "nearest_record": match.record.to_dict() if match.record else None,
+    }
+
+
 @app.get("/blocklist/v1")
 async def blocklist_v1():
     """
