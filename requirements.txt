@@ -5,7 +5,15 @@ pandas>=2.0
 pydantic>=2.5
 python-multipart>=0.0.9
 Pillow>=10.0
-# OCR dependency — optional at runtime. Tesseract binary is not installed on
-# Railway by default, so /ocr-predict will degrade gracefully until Cloud
-# Vision lands in Part 3.
 pytesseract>=0.3.10
+
+# Phase 2a runtime deps
+httpx>=0.27
+anthropic>=0.39
+tldextract>=5.1
+python-whois>=0.9.4
+
+# camel-tools is optional at runtime (preprocess.py falls back to regex
+# if it's missing). It's heavy (~200MB of MADAMIRA models on first use).
+# Uncomment to enable on Railway, OR install locally for retraining only.
+# camel-tools>=1.5
