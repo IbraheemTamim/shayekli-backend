@@ -13,6 +13,10 @@ anthropic>=0.39
 tldextract>=5.1
 python-whois>=0.9.4
 
+# Phase 3 — community scam database (Firestore is optional; the modules
+# fall back to local file storage when FIRESTORE_PROJECT_ID isn't set).
+google-cloud-firestore>=2.16
+
 # camel-tools is optional at runtime (preprocess.py falls back to regex
 # if it's missing). It's heavy (~200MB of MADAMIRA models on first use).
 # Uncomment to enable on Railway, OR install locally for retraining only.

@@ -30,6 +30,9 @@ from PIL import Image
 from preprocess import preprocess_arabic, extract_urls
 from url_reputation import analyze_urls, URLReport
 import claude_fallback
+import cloud_vision
+import sender_reputation
+import community_db
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("shayekli")
@@ -121,6 +124,17 @@ class URLReportOut(BaseModel):
     redirect_count: int = 0
 
 
+class SenderReportOut(BaseModel):
+    sender: str
+    normalized: str
+    country_prefix: Optional[str] = None
+    is_local: bool = False
+    is_short_code: bool = False
+    risk_score: int = 0
+    flags_ar: List[str] = []
+    community_reports: int = 0
+
+
 class PredictionResponse(BaseModel):
     is_scam: bool
     risk_level: str
@@ -129,6 +143,7 @@ class PredictionResponse(BaseModel):
     reasons: List[str]
     model_version: int = MODEL_VERSION
     urls: List[URLReportOut] = []
+    sender_report: Optional[SenderReportOut] = None
     used_claude: bool = False
     pipeline: List[str] = []
 
@@ -142,6 +157,7 @@ class HealthResponse(BaseModel):
     claude_enabled: bool = False
     safe_browsing_enabled: bool = False
     virustotal_enabled: bool = False
+    cloud_vision_enabled: bool = False
 
 
 class ModelVersionResponse(BaseModel):
@@ -277,6 +293,28 @@ async def detect(
     if not raw_text or not raw_text.strip():
         raise HTTPException(status_code=400, detail="Text cannot be empty.")
 
+    # Community SimHash lookup — short-circuits the pipeline if this
+    # message matches a previously reported scam template.
+    community_match = community_db.lookup(raw_text)
+    if community_match.matched and community_match.record is not None:
+        rec = community_match.record
+        sender_report = sender_reputation.analyze_sender(sender, raw_text)
+        return PredictionResponse(
+            is_scam=True,
+            risk_level="HIGH",
+            confidence=95.0,
+            message="رسالة مُبلَّغ عنها سابقاً من قِبَل المجتمع",
+            reasons=[
+                f"تم الإبلاغ عن هذه الرسالة من قِبَل {rec.count} مستخدم.",
+                "الصياغة تطابق نمط احتيال معروف في قاعدة بيانات شيّكلي.",
+            ],
+            urls=[],
+            sender_report=SenderReportOut(**sender_report.to_dict()) if sender_report else None,
+            used_claude=False,
+            pipeline=["preprocess", "community_match"],
+            model_version=MODEL_VERSION,
+        )
+
     clean = preprocess_arabic(raw_text)
     classifier_prob, _ = _run_classifier(clean if clean else raw_text)
 
@@ -285,6 +323,13 @@ async def detect(
 
     # Heuristic reasons from raw text (keywords, urgency etc.).
     reasons_local = heuristic_flags(raw_text)
+
+    # Sender reputation (Section 3.4) — heuristic + community DB.
+    sender_report = sender_reputation.analyze_sender(sender, raw_text)
+    if sender_report and sender_report.flags_ar:
+        for f in sender_report.flags_ar:
+            if f not in reasons_local:
+                reasons_local.append(f)
 
     # Claude only when uncertain AND key configured.
     claude_result = None
@@ -315,13 +360,21 @@ async def detect(
         else:
             reasons.append("لم يتم العثور على أنماط مشبوهة أو روابط خبيثة.")
 
+    # Fold the sender's risk into the final score (modest weight).
+    if sender_report and sender_report.risk_score:
+        risk = max(risk, min(100.0, risk + sender_report.risk_score * 0.3))
+        is_scam = risk >= 50.0
+        _, message = _risk_label(risk)
+        steps.append("sender_reputation")
+
     return PredictionResponse(
         is_scam=is_scam,
         risk_level=_risk_label(risk)[0],
-        confidence=risk,
+        confidence=round(risk, 2),
         message=message,
         reasons=reasons,
         urls=[URLReportOut(**r.to_dict()) for r in url_reports],
+        sender_report=SenderReportOut(**sender_report.to_dict()) if sender_report else None,
         used_claude=claude_result is not None,
         pipeline=steps,
         model_version=MODEL_VERSION,
@@ -357,6 +410,7 @@ def health():
         claude_enabled=claude_fallback.is_enabled(),
         safe_browsing_enabled=bool(os.environ.get("GOOGLE_SAFE_BROWSING_KEY")),
         virustotal_enabled=bool(os.environ.get("VIRUSTOTAL_API_KEY")),
+        cloud_vision_enabled=cloud_vision.is_enabled(),
     )
 
 
@@ -383,21 +437,78 @@ async def analyze_message(request: SMSRequest):
 
 @app.post("/ocr-predict", response_model=PredictionResponse)
 async def predict_image(file: UploadFile = File(...)):
+    """
+    Image scam detection. OCR pipeline:
+      1. Google Cloud Vision (DOCUMENT_TEXT_DETECTION) — preferred.
+      2. Tesseract — only if installed locally (dev fallback).
+      3. Otherwise return a friendly Arabic 503 explaining we need network.
+    Then runs the extracted text through the same `detect()` chain as
+    a plain text message, so URL reputation + Claude + classifier all
+    apply to image content too.
+    """
     if model is None:
         raise HTTPException(status_code=503, detail="Model is not loaded. Train the model first.")
 
-    tess = _try_load_tesseract()
-    if tess is None:
+    try:
+        contents = await file.read()
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail=f"Failed to read upload: {exc}")
+    if not contents:
+        raise HTTPException(status_code=400, detail="Empty upload.")
+
+    text = ""
+    ocr_engine = None
+
+    # --- Try Cloud Vision first ---
+    if cloud_vision.is_enabled():
+        try:
+            result = await cloud_vision.ocr_image_bytes(contents)
+            text = (result.text or "").strip()
+            ocr_engine = "cloud_vision"
+            log.info("Cloud Vision OCR: %s chars (langs=%s)", len(text), result.raw_languages)
+        except cloud_vision.CloudVisionUnavailable:
+            pass  # fall through to tesseract
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Cloud Vision OCR failed: %s", exc)
+
+    # --- Tesseract fallback (dev only — won't exist on Railway) ---
+    if not text:
+        tess = _try_load_tesseract()
+        if tess is not None:
+            try:
+                image = Image.open(io.BytesIO(contents))
+                text = (tess.image_to_string(image, lang="ara") or "").strip()
+                ocr_engine = "tesseract"
+            except Exception as exc:  # noqa: BLE001
+                log.warning("Tesseract OCR failed: %s", exc)
+
+    # --- Neither available ---
+    if not text and ocr_engine is None:
+        if not cloud_vision.is_enabled():
+            return JSONResponse(
+                status_code=503,
+                content={
+                    "is_scam": False,
+                    "risk_level": "LOW",
+                    "confidence": 0.0,
+                    "message": "فحص الصور يتطلب اتصالاً بالإنترنت",
+                    "reasons": [
+                        "لم يتم تفعيل خدمة استخراج النص السحابية. يرجى المحاولة لاحقاً أو استخدام فحص النص.",
+                    ],
+                    "model_version": MODEL_VERSION,
+                    "urls": [],
+                    "used_claude": False,
+                    "pipeline": [],
+                },
+            )
         return JSONResponse(
-            status_code=503,
+            status_code=502,
             content={
                 "is_scam": False,
                 "risk_level": "LOW",
                 "confidence": 0.0,
-                "message": "فحص الصور غير متاح حالياً",
-                "reasons": [
-                    "خدمة استخراج النص من الصور قيد الترقية. الرجاء استخدام فحص النص في الوقت الحالي.",
-                ],
+                "message": "تعذّر فحص الصورة",
+                "reasons": ["تعذّر استخراج النص من الصورة الآن. حاول مرة أخرى."],
                 "model_version": MODEL_VERSION,
                 "urls": [],
                 "used_claude": False,
@@ -405,30 +516,21 @@ async def predict_image(file: UploadFile = File(...)):
             },
         )
 
-    try:
-        contents = await file.read()
-        image = Image.open(io.BytesIO(contents))
-        try:
-            extracted_text = tess.image_to_string(image, lang="ara")
-        except Exception as exc:  # noqa: BLE001
-            log.warning("Tesseract OCR failed: %s", exc)
-            raise HTTPException(status_code=500, detail=f"OCR Processing failed: {exc}")
+    if not text:
+        return PredictionResponse(
+            is_scam=False,
+            risk_level="LOW",
+            confidence=0.0,
+            message="تعذر استخراج نص",
+            reasons=["لم يتم العثور على نص واضح في هذه الصورة."],
+            model_version=MODEL_VERSION,
+            pipeline=[f"ocr:{ocr_engine}"] if ocr_engine else [],
+        )
 
-        text = extracted_text.strip()
-        if not text:
-            return PredictionResponse(
-                is_scam=False,
-                risk_level="LOW",
-                confidence=0.0,
-                message="تعذر استخراج نص",
-                reasons=["لم يتم العثور على نص واضح في هذه الصورة."],
-                model_version=MODEL_VERSION,
-            )
-        return await detect(text)
-    except HTTPException:
-        raise
-    except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=400, detail=f"Failed to process image: {exc}")
+    response = await detect(text)
+    if ocr_engine:
+        response.pipeline = [f"ocr:{ocr_engine}", *response.pipeline]
+    return response
 
 
 # ---------------------------------------------------------------------------
@@ -437,8 +539,9 @@ async def predict_image(file: UploadFile = File(...)):
 @app.post("/feedback")
 async def submit_feedback(payload: dict):
     """
-    User feedback loop (Section 3.6). For now we append to a JSONL file on
-    Railway disk; Firestore wiring lands in Part 3.
+    User feedback loop (Section 3.6). Persists the feedback to a JSONL
+    file and, when the user confirmed a scam AND included a sender,
+    increments the community sender-reputation counter.
     """
     payload = dict(payload or {})
     payload["model_version"] = MODEL_VERSION
@@ -447,7 +550,63 @@ async def submit_feedback(payload: dict):
             f.write(json.dumps(payload, ensure_ascii=False) + "\n")
     except Exception as exc:  # noqa: BLE001
         log.warning("feedback write failed: %s", exc)
-    return {"status": "received"}
+
+    new_count = None
+    community_count = None
+    try:
+        verdict = str(payload.get("verdict", "")).lower()
+        if verdict in ("scam", "confirm_scam"):
+            sender = payload.get("sender") or ""
+            if sender:
+                new_count = sender_reputation.report_sender(sender, category="scam")
+            text = payload.get("text") or ""
+            if text:
+                rec = community_db.report_scam(text, category=payload.get("category", "scam"))
+                community_count = rec.count
+    except Exception as exc:  # noqa: BLE001
+        log.warning("feedback updates failed: %s", exc)
+
+    return {
+        "status": "received",
+        "sender_report_count": new_count,
+        "community_report_count": community_count,
+    }
+
+
+@app.get("/community/stats")
+def community_stats():
+    return community_db.stats()
+
+
+@app.get("/blocklist/v1")
+async def blocklist_v1():
+    """
+    Daily-synced blocklist used by the on-device VpnService (Section 3.3).
+    Combines:
+      - PhishTank cache (already refreshed in url_reputation)
+      - Static seed of high-volume Palestinian-context phishing TLDs.
+
+    Response shape is intentionally tiny so the device can cache it:
+        { "version": <epoch>, "domains": ["evil.tk", "phish.xyz", ...] }
+    """
+    from url_reputation import _phishtank_cache, _refresh_phishtank
+    import time, httpx
+    # Best-effort refresh; ignore failures.
+    try:
+        async with httpx.AsyncClient() as client:
+            await _refresh_phishtank(client)
+    except Exception:  # noqa: BLE001
+        pass
+    domains = sorted(_phishtank_cache)
+    # Cap payload — devices don't need the full feed, top N is plenty.
+    cap = int(os.environ.get("BLOCKLIST_CAP", "20000"))
+    if len(domains) > cap:
+        domains = domains[:cap]
+    return {
+        "version": int(time.time()),
+        "count": len(domains),
+        "domains": domains,
+    }
 
 
 @app.get("/model/download")
