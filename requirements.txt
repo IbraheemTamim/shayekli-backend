@@ -1,0 +1,11 @@
+fastapi>=0.110
+uvicorn[standard]>=0.29
+scikit-learn>=1.3
+pandas>=2.0
+pydantic>=2.5
+python-multipart>=0.0.9
+Pillow>=10.0
+# OCR dependency — optional at runtime. Tesseract binary is not installed on
+# Railway by default, so /ocr-predict will degrade gracefully until Cloud
+# Vision lands in Part 3.
+pytesseract>=0.3.10

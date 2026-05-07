@@ -1,0 +1,23 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.env
+.env.local
+.env.*
+venv/
+.venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Local artefacts that shouldn't ship in the cloud image.
+*.onnx
+datasets/
+notebooks/
+.idea/
+.vscode/
+
+# Intentionally exclude heavy local model files. Use MODEL_DOWNLOAD_URL
+# at runtime if you want to fetch large models on first boot.
