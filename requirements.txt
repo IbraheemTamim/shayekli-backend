@@ -13,9 +13,12 @@ anthropic>=0.39
 tldextract>=5.1
 python-whois>=0.9.4
 
-# Phase 3 — community scam database (Firestore is optional; the modules
-# fall back to local file storage when FIRESTORE_PROJECT_ID isn't set).
+# Phase 3 — community scam database. Storage backend is chosen at runtime:
+#   1. Postgres if DATABASE_URL is set (Railway Postgres injects this)
+#   2. Firestore if FIRESTORE_PROJECT_ID is set
+#   3. Local JSONL file otherwise (ephemeral on Railway — only good for dev)
 google-cloud-firestore>=2.16
+psycopg2-binary>=2.9
 
 # Phase 2b runtime — AraBERT ONNX inference. Lightweight: tokenizers is
 # pure Rust (no transformers/torch dep), onnxruntime is ~12 MB.

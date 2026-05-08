@@ -11,11 +11,13 @@ message's SimHash is within Hamming-distance 3 of any reported scam.
 A match short-circuits the rest of the pipeline with a high-confidence
 "reported by N users" verdict.
 
-Persistence layers:
-  - Primary: Firestore (when FIRESTORE_PROJECT_ID is configured).
-  - Local fallback: a JSONL file + in-memory dict, so the feature still
-    works on Railway with no external creds. Retraining or container
-    restarts lose the local db unless you mount a volume.
+Persistence backends, picked at runtime in this priority order:
+  1. Postgres (when DATABASE_URL is set — Railway Postgres injects it).
+     This is the recommended production path: persistent across deploys,
+     atomic increments, scales across instances.
+  2. Firestore (when FIRESTORE_PROJECT_ID is set).
+  3. Local JSONL file + in-memory dict (default fallback — fine for dev,
+     ephemeral on Railway because container filesystem doesn't persist).
 """
 
 from __future__ import annotations
@@ -37,6 +39,7 @@ log = logging.getLogger("shayekli.community")
 LOCAL_PATH = Path(os.environ.get("COMMUNITY_DB_PATH", "community_db.jsonl"))
 SIMHASH_BITS = 64
 HAMMING_THRESHOLD = int(os.environ.get("SIMHASH_HAMMING", "3"))
+DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
 
 
 # ---------------------------------------------------------------------------
@@ -157,6 +160,182 @@ def _firestore() -> "object | None":
         return None
 
 
+# ---------------------------------------------------------------------------
+# Postgres backend (preferred when DATABASE_URL is set)
+# ---------------------------------------------------------------------------
+_pg_pool = None
+_pg_init_done = False
+
+
+def _pg() -> "object | None":
+    """Return a ConnectionPool, or None if Postgres isn't configured."""
+    global _pg_pool, _pg_init_done
+    if not DATABASE_URL:
+        return None
+    if _pg_pool is not None:
+        return _pg_pool
+    try:
+        from psycopg2.pool import SimpleConnectionPool  # type: ignore
+        _pg_pool = SimpleConnectionPool(1, 5, DATABASE_URL)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("Postgres unavailable for community_db: %s", exc)
+        return None
+    if not _pg_init_done:
+        try:
+            _pg_init_schema()
+            _pg_init_done = True
+        except Exception as exc:  # noqa: BLE001
+            log.error("community_db schema init failed: %s", exc)
+            return None
+    return _pg_pool
+
+
+def _pg_init_schema() -> None:
+    """Idempotent CREATE TABLE for the community_scams table."""
+    pool = _pg_pool
+    if pool is None:
+        return
+    conn = pool.getconn()
+    try:
+        conn.autocommit = True
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS community_scams (
+                    simhash       TEXT PRIMARY KEY,
+                    category      TEXT NOT NULL DEFAULT 'scam',
+                    count         INTEGER NOT NULL DEFAULT 0,
+                    first_seen    DOUBLE PRECISION NOT NULL,
+                    last_seen     DOUBLE PRECISION NOT NULL
+                )
+                """
+            )
+        log.info("community_scams Postgres schema ready.")
+    finally:
+        pool.putconn(conn)
+
+
+def _pg_report(h: int, category: str) -> ScamRecord:
+    pool = _pg()
+    now = time.time()
+    conn = pool.getconn()
+    try:
+        conn.autocommit = True
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO community_scams (simhash, category, count, first_seen, last_seen)
+                VALUES (%s, %s, 1, %s, %s)
+                ON CONFLICT (simhash) DO UPDATE
+                    SET count = community_scams.count + 1,
+                        last_seen = EXCLUDED.last_seen,
+                        category = COALESCE(community_scams.category, EXCLUDED.category)
+                RETURNING category, count, first_seen, last_seen
+                """,
+                (str(h), category, now, now),
+            )
+            row = cur.fetchone()
+            return ScamRecord(
+                simhash=h,
+                category=row[0],
+                count=int(row[1]),
+                first_seen=float(row[2]),
+                last_seen=float(row[3]),
+            )
+    finally:
+        pool.putconn(conn)
+
+
+def _pg_lookup(h: int) -> "MatchResult":
+    """Postgres lookup: exact-hash hit OR fall back to in-process Hamming scan."""
+    pool = _pg()
+    conn = pool.getconn()
+    try:
+        conn.autocommit = True
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT category, count, first_seen, last_seen FROM community_scams WHERE simhash = %s",
+                (str(h),),
+            )
+            row = cur.fetchone()
+            if row is not None:
+                rec = ScamRecord(
+                    simhash=h,
+                    category=row[0],
+                    count=int(row[1]),
+                    first_seen=float(row[2]),
+                    last_seen=float(row[3]),
+                )
+                return MatchResult(matched=True, record=rec, distance=0)
+            # Near-match: pull all hashes (cheap until we cross ~100k rows)
+            # and scan in-process. We only return a HIT if Hamming ≤ threshold.
+            cur.execute("SELECT simhash, category, count, first_seen, last_seen FROM community_scams")
+            best: Optional[ScamRecord] = None
+            best_d = 65
+            for r in cur:
+                try:
+                    stored_h = int(r[0])
+                except Exception:
+                    continue
+                d = hamming(stored_h, h)
+                if d < best_d:
+                    best_d = d
+                    best = ScamRecord(
+                        simhash=stored_h,
+                        category=r[1],
+                        count=int(r[2]),
+                        first_seen=float(r[3]),
+                        last_seen=float(r[4]),
+                    )
+                    if d == 0:
+                        break
+            if best is not None and best_d <= HAMMING_THRESHOLD:
+                return MatchResult(matched=True, record=best, distance=best_d)
+            return MatchResult(matched=False, record=best, distance=best_d)
+    finally:
+        pool.putconn(conn)
+
+
+def _pg_remove(h: int) -> bool:
+    """Best-effort cleanup of a near-match neighbourhood for a false_positive."""
+    pool = _pg()
+    conn = pool.getconn()
+    removed = False
+    try:
+        conn.autocommit = True
+        with conn.cursor() as cur:
+            cur.execute("SELECT simhash FROM community_scams")
+            rows = [r[0] for r in cur.fetchall()]
+            to_delete: list[str] = []
+            for s in rows:
+                try:
+                    if hamming(int(s), h) <= HAMMING_THRESHOLD:
+                        to_delete.append(s)
+                except Exception:
+                    continue
+            if to_delete:
+                cur.execute(
+                    "DELETE FROM community_scams WHERE simhash = ANY(%s)",
+                    (to_delete,),
+                )
+                removed = True
+        return removed
+    finally:
+        pool.putconn(conn)
+
+
+def _pg_count() -> int:
+    pool = _pg()
+    conn = pool.getconn()
+    try:
+        conn.autocommit = True
+        with conn.cursor() as cur:
+            cur.execute("SELECT COUNT(*) FROM community_scams")
+            return int(cur.fetchone()[0])
+    finally:
+        pool.putconn(conn)
+
+
 def _load_local() -> None:
     global _loaded
     if _loaded:
@@ -188,7 +367,6 @@ def _persist_local(rec: ScamRecord) -> None:
 # ---------------------------------------------------------------------------
 def report_scam(text: str, category: str = "scam") -> ScamRecord:
     """Record (or increment) a confirmed-scam template."""
-    _load_local()
     template = strip_personal_data(text)
     h = simhash(template)
     if h == 0 or len(template) < MIN_TEMPLATE_CHARS:
@@ -198,6 +376,14 @@ def report_scam(text: str, category: str = "scam") -> ScamRecord:
         )
         return ScamRecord(simhash=0, category=category, count=0, first_seen=0.0, last_seen=0.0)
 
+    # Postgres-first when available (Railway-managed, persistent, atomic).
+    if _pg() is not None:
+        try:
+            return _pg_report(h, category)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Postgres community report failed (%s) — falling back.", exc)
+
+    _load_local()
     fc = _firestore()
     if fc is not None:
         try:
@@ -253,12 +439,18 @@ def report_false_positive(text: str) -> bool:
     so the user's "this is fine" verdict applies to the entire fuzzy
     cluster, not just the precise wording they typed today.
     """
-    _load_local()
     template = strip_personal_data(text)
     h = simhash(template)
     if h == 0:
         return False
 
+    if _pg() is not None:
+        try:
+            return _pg_remove(h)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Postgres false-positive removal failed (%s) — falling back.", exc)
+
+    _load_local()
     removed = False
 
     fc = _firestore()
@@ -291,12 +483,18 @@ def report_false_positive(text: str) -> bool:
 
 def lookup(text: str) -> MatchResult:
     """Check whether the message looks like an already-reported scam."""
-    _load_local()
     template = strip_personal_data(text)
     h = simhash(template)
     if h == 0:
         return MatchResult(matched=False, record=None, distance=64)
 
+    if _pg() is not None:
+        try:
+            return _pg_lookup(h)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Postgres community lookup failed (%s) — falling back.", exc)
+
+    _load_local()
     # Firestore: do an exact-match lookup only (querying by Hamming
     # distance requires a geohash-style trick that's overkill for this
     # use case). Then fall back to in-memory near-match.
@@ -334,9 +532,25 @@ def lookup(text: str) -> MatchResult:
 
 
 def stats() -> dict:
+    """
+    Surfaces the count from whatever backend is in use. The "local_count"
+    name is preserved for client compatibility; in Postgres mode it's
+    actually the count rows in the shared table.
+    """
+    if _pg() is not None:
+        try:
+            return {
+                "local_count": _pg_count(),
+                "backend": "postgres",
+                "firestore_enabled": False,
+                "hamming_threshold": HAMMING_THRESHOLD,
+            }
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Postgres count failed (%s).", exc)
     _load_local()
     return {
         "local_count": len(_local_index),
+        "backend": "firestore" if _firestore() is not None else "local",
         "firestore_enabled": _firestore() is not None,
         "hamming_threshold": HAMMING_THRESHOLD,
     }

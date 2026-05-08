@@ -109,10 +109,13 @@ def _hash(normalized: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Optional Firestore-backed community DB
+# Optional persistent backends (Postgres preferred, then Firestore, then local)
 # ---------------------------------------------------------------------------
 _firestore_client = None
 _community_local: dict[str, int] = {}
+DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
+_pg_pool = None
+_pg_init_done = False
 
 
 def _firestore() -> "object | None":
@@ -131,6 +134,42 @@ def _firestore() -> "object | None":
         return None
 
 
+def _pg() -> "object | None":
+    """Postgres connection pool — preferred over Firestore + local."""
+    global _pg_pool, _pg_init_done
+    if not DATABASE_URL:
+        return None
+    if _pg_pool is not None:
+        return _pg_pool
+    try:
+        from psycopg2.pool import SimpleConnectionPool  # type: ignore
+        _pg_pool = SimpleConnectionPool(1, 5, DATABASE_URL)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("Postgres unavailable for sender_reputation: %s", exc)
+        return None
+    if not _pg_init_done:
+        try:
+            conn = _pg_pool.getconn()
+            conn.autocommit = True
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS sender_reputation (
+                        sender_hash TEXT PRIMARY KEY,
+                        category    TEXT NOT NULL DEFAULT 'scam',
+                        count       INTEGER NOT NULL DEFAULT 0
+                    )
+                    """
+                )
+            _pg_pool.putconn(conn)
+            _pg_init_done = True
+            log.info("sender_reputation Postgres schema ready.")
+        except Exception as exc:  # noqa: BLE001
+            log.error("sender_reputation schema init failed: %s", exc)
+            return None
+    return _pg_pool
+
+
 def report_sender(number: str, category: str = "scam") -> int:
     """
     Increment the community report counter for a number. Returns the
@@ -140,6 +179,30 @@ def report_sender(number: str, category: str = "scam") -> int:
     if not norm:
         return 0
     digest = _hash(norm)
+
+    # Postgres-first (atomic UPSERT, persistent across deploys).
+    pool = _pg()
+    if pool is not None:
+        conn = pool.getconn()
+        try:
+            conn.autocommit = True
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO sender_reputation (sender_hash, category, count)
+                    VALUES (%s, %s, 1)
+                    ON CONFLICT (sender_hash) DO UPDATE
+                        SET count = sender_reputation.count + 1
+                    RETURNING count
+                    """,
+                    (digest, category),
+                )
+                return int(cur.fetchone()[0])
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Postgres sender write failed: %s", exc)
+        finally:
+            pool.putconn(conn)
+
     fc = _firestore()
     if fc is not None:
         try:
@@ -156,6 +219,24 @@ def report_sender(number: str, category: str = "scam") -> int:
 
 def _community_count(normalized: str) -> int:
     digest = _hash(normalized)
+
+    pool = _pg()
+    if pool is not None:
+        conn = pool.getconn()
+        try:
+            conn.autocommit = True
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT count FROM sender_reputation WHERE sender_hash = %s",
+                    (digest,),
+                )
+                row = cur.fetchone()
+                return int(row[0]) if row else 0
+        except Exception as exc:  # noqa: BLE001
+            log.debug("Postgres sender read failed: %s", exc)
+        finally:
+            pool.putconn(conn)
+
     fc = _firestore()
     if fc is not None:
         try:
