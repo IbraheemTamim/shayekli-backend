@@ -146,6 +146,9 @@ class PredictionResponse(BaseModel):
     sender_report: Optional[SenderReportOut] = None
     used_claude: bool = False
     pipeline: List[str] = []
+    # For /ocr-predict: the actual text Cloud Vision lifted from the image,
+    # so the result screen can show what was scanned instead of a placeholder.
+    extracted_text: Optional[str] = None
 
 
 class HealthResponse(BaseModel):
@@ -551,6 +554,9 @@ async def predict_image(file: UploadFile = File(...)):
     response = await detect(text)
     if ocr_engine:
         response.pipeline = [f"ocr:{ocr_engine}", *response.pipeline]
+    # Surface the extracted text so the client can show it on the result
+    # screen instead of a "(text from image)" placeholder.
+    response.extracted_text = text
     return response
 
 
