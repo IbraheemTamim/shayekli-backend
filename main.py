@@ -666,6 +666,84 @@ async def blocklist_v1():
     }
 
 
+# ---------------------------------------------------------------------------
+# Heuristic-pattern config (Phase 4.x — server-managed rules).
+#
+# The on-device DNS guard (BlocklistStore.matchesHeuristic) reads this
+# JSON daily so we can fix false positives or add new patterns without
+# rebuilding the APK. Edit the dict below, push, redeploy → every client
+# picks it up on next sync.
+# ---------------------------------------------------------------------------
+HEURISTICS_V1 = {
+    # Brand-impersonation rules: if `needle` appears in a host whose
+    # registrable domain isn't in `official`, the host is suspect.
+    "palestinian_brands": [
+        {"needle": "jawwal",          "official": ["jawwal.ps"]},
+        {"needle": "jawaal",          "official": ["jawwal.ps"]},  # phisher typo
+        {"needle": "paltel",          "official": ["paltel.ps"]},
+        {"needle": "bankofpalestine", "official": ["bankofpalestine.ps"]},
+        {"needle": "bopalestine",     "official": ["bankofpalestine.ps"]},
+        {"needle": "bop-",            "official": ["bankofpalestine.ps"]},
+        {"needle": "ooredoo",         "official": ["ooredoo.ps"]},
+        {"needle": "hadara",          "official": ["hadara.ps"]},
+        {"needle": "cab-",            "official": ["cab.com.jo", "cab.ps"]},
+        {"needle": "cairoamman",      "official": ["cab.com.jo"]},
+    ],
+    # Substring patterns that are high-precision signals of a phishing
+    # domain regardless of TLD. Match anywhere in the host.
+    "grift_patterns": [
+        "-prize-", "-win-", "-winner-",
+        "-cash-", "-reward-", "-bonus-",
+        "-claim-", "-redeem-",
+        "-secure-login", "-secure-account",
+        "-account-verify", "-verify-account",
+        "-update-account",
+        "free-iphone", "free-paypal", "free-cash",
+    ],
+    # Cheap / abuse-heavy TLDs. A domain on one of these is suspect when
+    # it ALSO contains a danger keyword (auth/finance/brand).
+    "cheap_tlds": [
+        ".tk", ".ml", ".ga", ".cf", ".gq",
+        ".top", ".xyz", ".click", ".buzz",
+        ".rest", ".country", ".loan", ".work",
+    ],
+    # Keywords that, on a cheap TLD, push a domain into the block bucket.
+    "danger_keywords": [
+        # Generic auth/finance.
+        "bank", "login", "verify", "secure", "account",
+        "update", "wallet", "pay", "card", "auth",
+        # Western brand impersonation (only fires on cheap TLDs, never on .com/.net).
+        "paypal", "apple", "microsoft", "amazon",
+        "facebook", "instagram", "whatsapp", "telegram",
+        "google", "netflix",
+        # Palestinian brand impersonation (already covered above for any
+        # TLD, but listed here too so cheap-TLD + jawwal hits even if the
+        # specific brand-suffix rule changes).
+        "jawwal", "paltel", "ooredoo", "bankofpalestine",
+    ],
+    # Per-rule kill-switches the client respects.
+    "checks": {
+        "ip_literal": True,
+        "punycode": True,
+    },
+}
+
+
+@app.get("/heuristics/v1")
+def heuristics_v1():
+    """
+    Server-managed heuristic patterns for the on-device URL guard.
+
+    The device caches this daily and falls back to bundled defaults if
+    the request fails. We expose a `version` (UNIX epoch) so the client
+    can detect changes without diff-checking the whole config.
+    """
+    import time
+    payload = dict(HEURISTICS_V1)
+    payload["version"] = int(time.time())
+    return payload
+
+
 @app.get("/model/download")
 def model_download():
     """
