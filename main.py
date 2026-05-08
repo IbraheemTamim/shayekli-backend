@@ -33,8 +33,13 @@ import claude_fallback
 import cloud_vision
 import sender_reputation
 import community_db
+import observability
+import auth
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+# Phase 5: structured JSON logs everywhere. Replace the simple-format
+# basicConfig with our JSON formatter so every log line is machine-readable
+# AND never contains raw user message text (we only log hashes).
+observability.install_json_logging()
 log = logging.getLogger("shayekli")
 
 # ---------------------------------------------------------------------------
@@ -70,6 +75,12 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Phase 5 — observability + optional auth, in this order:
+#   1. JSON request log + latency metrics (always on)
+#   2. API key gate (only if BACKEND_API_KEY is set)
+observability.request_logging_middleware(app)
+auth.install(app)
 
 # ---------------------------------------------------------------------------
 # Optional Tesseract OCR (will be replaced by Cloud Vision in Part 3).
@@ -312,9 +323,13 @@ async def detect(
     raw_text: str,
     sender: Optional[str] = None,
 ) -> PredictionResponse:
+    observability.incr("predict_total")
+    detect_start = __import__("time").perf_counter()
     if model is None:
+        observability.incr("predict_error")
         raise HTTPException(status_code=503, detail="Model is not loaded. Train the model first.")
     if not raw_text or not raw_text.strip():
+        observability.incr("predict_error")
         raise HTTPException(status_code=400, detail="Text cannot be empty.")
 
     # Community SimHash lookup — short-circuits the pipeline if this
@@ -391,6 +406,26 @@ async def detect(
         _, message = _risk_label(risk)
         steps.append("sender_reputation")
 
+    detect_latency_ms = round((__import__("time").perf_counter() - detect_start) * 1000.0, 2)
+    observability.observe_latency("predict.detect", detect_latency_ms)
+    if is_scam:
+        observability.incr("predict_scam")
+    else:
+        observability.incr("predict_safe")
+    log.info(
+        "detect",
+        extra={
+            "msg_hash": observability.hash_text(raw_text),
+            "sender_hash": observability.hash_sender(sender),
+            "verdict": "scam" if is_scam else "legit",
+            "confidence": round(risk, 2),
+            "pipeline": steps,
+            "url_count": len(url_reports),
+            "claude_used": claude_result is not None,
+            "model_version": MODEL_VERSION,
+            "latency_ms": detect_latency_ms,
+        },
+    )
     return PredictionResponse(
         is_scam=is_scam,
         risk_level=_risk_label(risk)[0],
@@ -436,6 +471,12 @@ def health():
         virustotal_enabled=bool(os.environ.get("VIRUSTOTAL_API_KEY")),
         cloud_vision_enabled=cloud_vision.is_enabled(),
     )
+
+
+@app.get("/metrics")
+def metrics():
+    """In-process counters + per-route latency percentiles."""
+    return observability.snapshot()
 
 
 @app.get("/model/version", response_model=ModelVersionResponse)
@@ -572,6 +613,11 @@ async def submit_feedback(payload: dict):
     """
     payload = dict(payload or {})
     payload["model_version"] = MODEL_VERSION
+    verdict_raw = str(payload.get("verdict", "")).lower()
+    if verdict_raw in ("scam", "confirm_scam"):
+        observability.incr("feedback_confirm_scam")
+    elif verdict_raw == "false_positive":
+        observability.incr("feedback_false_positive")
     try:
         with FEEDBACK_PATH.open("a", encoding="utf-8") as f:
             f.write(json.dumps(payload, ensure_ascii=False) + "\n")

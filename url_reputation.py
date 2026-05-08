@@ -135,6 +135,43 @@ async def _unshorten(client: httpx.AsyncClient, url: str) -> tuple[str, int]:
     return current, hops
 
 
+async def _retrying_post(client: httpx.AsyncClient, url: str, **kwargs) -> httpx.Response:
+    """
+    POST with up to 3 attempts on transient failures (timeouts, 5xx).
+    Exponential backoff: 0.4s, 0.8s, 1.6s. Honoured everywhere we hit a
+    third-party API so a single transient blip doesn't poison detection.
+    """
+    last_exc: Exception | None = None
+    for attempt in range(3):
+        try:
+            resp = await client.post(url, **kwargs)
+            if resp.status_code < 500 or attempt == 2:
+                return resp
+            log.debug("retrying POST %s after %s (attempt=%s)", url, resp.status_code, attempt + 1)
+        except (httpx.TimeoutException, httpx.NetworkError, httpx.RemoteProtocolError) as exc:
+            last_exc = exc
+            log.debug("retrying POST %s after %s (attempt=%s)", url, type(exc).__name__, attempt + 1)
+        await asyncio.sleep(0.4 * (2 ** attempt))
+    if last_exc:
+        raise last_exc
+    raise RuntimeError("retry path inconsistency")
+
+
+async def _retrying_get(client: httpx.AsyncClient, url: str, **kwargs) -> httpx.Response:
+    last_exc: Exception | None = None
+    for attempt in range(3):
+        try:
+            resp = await client.get(url, **kwargs)
+            if resp.status_code < 500 or attempt == 2:
+                return resp
+        except (httpx.TimeoutException, httpx.NetworkError, httpx.RemoteProtocolError) as exc:
+            last_exc = exc
+        await asyncio.sleep(0.4 * (2 ** attempt))
+    if last_exc:
+        raise last_exc
+    raise RuntimeError("retry path inconsistency")
+
+
 async def _safe_browsing(client: httpx.AsyncClient, url: str) -> str | None:
     """Returns the threat type (e.g. 'SOCIAL_ENGINEERING') or None."""
     if not SAFE_BROWSING_KEY:
@@ -154,7 +191,8 @@ async def _safe_browsing(client: httpx.AsyncClient, url: str) -> str | None:
         },
     }
     try:
-        resp = await client.post(
+        resp = await _retrying_post(
+            client,
             f"https://safebrowsing.googleapis.com/v4/threatMatches:find?key={SAFE_BROWSING_KEY}",
             json=payload,
             timeout=HTTP_TIMEOUT,
@@ -180,7 +218,8 @@ async def _virustotal(client: httpx.AsyncClient, url: str) -> tuple[int, int]:
         # VirusTotal v3 needs a base64url'd URL identifier without padding.
         import base64
         ident = base64.urlsafe_b64encode(url.encode()).rstrip(b"=").decode()
-        resp = await client.get(
+        resp = await _retrying_get(
+            client,
             f"https://www.virustotal.com/api/v3/urls/{ident}",
             headers={"x-apikey": VIRUSTOTAL_KEY},
             timeout=HTTP_TIMEOUT,

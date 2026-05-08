@@ -69,11 +69,23 @@ async def ocr_image_bytes(image_bytes: bytes) -> OCRResult:
         ]
     }
 
+    # 3 attempts on transient timeout / 5xx — Cloud Vision can hiccup
+    # under load and a single retry has near-zero cost (image is already
+    # in memory). Exponential backoff: 0.4s, 0.8s, 1.6s.
+    import asyncio
+    last_exc: Exception | None = None
+    resp = None
     async with httpx.AsyncClient(timeout=TIMEOUT) as client:
-        try:
-            resp = await client.post(f"{ENDPOINT}?key={API_KEY}", json=payload)
-        except Exception as exc:  # noqa: BLE001
-            raise CloudVisionError(f"network error: {exc}") from exc
+        for attempt in range(3):
+            try:
+                resp = await client.post(f"{ENDPOINT}?key={API_KEY}", json=payload)
+                if resp.status_code < 500 or attempt == 2:
+                    break
+            except (httpx.TimeoutException, httpx.NetworkError, httpx.RemoteProtocolError) as exc:
+                last_exc = exc
+            await asyncio.sleep(0.4 * (2 ** attempt))
+    if resp is None:
+        raise CloudVisionError(f"network error: {last_exc}") from last_exc
 
     if resp.status_code != 200:
         raise CloudVisionError(f"HTTP {resp.status_code}: {resp.text[:300]}")
