@@ -134,15 +134,21 @@ def main() -> None:
         }
 
     collator = DataCollatorWithPadding(tokenizer)
-    trainer = Trainer(
+    # Newer transformers removed `tokenizer=` from Trainer.__init__; the
+    # collator already carries the tokenizer reference. Pass via the new
+    # `processing_class=` kwarg when available, omit otherwise.
+    trainer_kwargs = dict(
         model=model,
         args=training_args,
         train_dataset=train_ds,
         eval_dataset=eval_ds,
-        tokenizer=tokenizer,
         data_collator=collator,
         compute_metrics=compute_metrics,
     )
+    try:
+        trainer = Trainer(**trainer_kwargs, processing_class=tokenizer)
+    except TypeError:
+        trainer = Trainer(**trainer_kwargs)
 
     log.info("Training…")
     trainer.train()

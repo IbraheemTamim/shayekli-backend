@@ -102,7 +102,11 @@ def _load_palestinian_templates() -> list[tuple[str, int, str]]:
 
 def _load_huggingface_smishing(max_rows: int | None = None) -> list[tuple[str, int, str]]:
     """
-    Pull ealvaradob/phishing-dataset SMS subset. Optional dep: `datasets`.
+    Pull a public phishing-text dataset from HuggingFace.
+
+    Tries multiple known-good repos / configs; logs failures at INFO so
+    silent corpus shrinkage is impossible. Falls through on failure to
+    the next candidate.
     """
     try:
         from datasets import load_dataset  # type: ignore
@@ -111,25 +115,54 @@ def _load_huggingface_smishing(max_rows: int | None = None) -> list[tuple[str, i
         return []
 
     rows: list[tuple[str, int, str]] = []
+    # Each entry: (repo, config_or_None, text_col_priority, label_col_priority)
     candidates = [
-        ("ealvaradob/phishing-dataset", "texts"),
         ("ealvaradob/phishing-dataset", "combined_full"),
+        ("ealvaradob/phishing-dataset", "combined_reduced"),
+        ("ealvaradob/phishing-dataset", "texts"),
+        ("Hellisotherpeople/sms-spam", None),
+        ("ucirvine/sms_spam", None),
     ]
     for repo, config in candidates:
+        cfg_label = f"/{config}" if config else ""
         try:
-            ds = load_dataset(repo, config, split="train", trust_remote_code=True)
-        except Exception as exc:
-            log.debug("HF load failed for %s/%s: %s", repo, config, exc)
+            if config:
+                ds = load_dataset(repo, config, split="train", trust_remote_code=True)
+            else:
+                ds = load_dataset(repo, split="train", trust_remote_code=True)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("HF load failed for %s%s: %s", repo, cfg_label, exc)
             continue
-        log.info("Loaded HF %s/%s with %s rows", repo, config, len(ds))
+        log.info("Loaded HF %s%s — %s rows", repo, cfg_label, len(ds))
+
+        sample = ds[0] if len(ds) > 0 else {}
+        text_col = next((c for c in ("text", "body", "message", "Message", "sms", "email") if c in sample), None)
+        label_col = next((c for c in ("label", "Category", "class", "is_spam") if c in sample), None)
+        if not text_col or not label_col:
+            log.warning("  Couldn't infer text/label columns. Keys: %s", list(sample.keys()))
+            continue
+
+        kept = 0
         for i, ex in enumerate(ds):
-            if max_rows and i >= max_rows:
+            if max_rows and kept >= max_rows:
                 break
-            text = (ex.get("text") or ex.get("body") or "").strip()
-            label = int(ex.get("label") or 0)
-            if text:
-                rows.append((text, label, f"hf:{repo}:{config}"))
-        break  # use the first config that loads successfully
+            text = str(ex.get(text_col) or "").strip()
+            raw_label = ex.get(label_col)
+            if isinstance(raw_label, str):
+                label = 1 if raw_label.lower() in ("spam", "phish", "phishing", "smishing", "1", "true") else 0
+            else:
+                try:
+                    label = 1 if int(raw_label) == 1 else 0
+                except Exception:
+                    label = 0
+            # Drop overlong emails — they kill SimHash + tokenizer budget.
+            if not text or len(text) > 4000:
+                continue
+            rows.append((text, label, f"hf:{repo}{cfg_label}"))
+            kept += 1
+        log.info("  Kept %s usable rows from %s", kept, repo)
+        if kept > 0:
+            break  # first non-empty source is enough at our scale
     return rows
 
 
