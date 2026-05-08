@@ -553,16 +553,22 @@ async def submit_feedback(payload: dict):
 
     new_count = None
     community_count = None
+    removed = False
     try:
         verdict = str(payload.get("verdict", "")).lower()
+        text = payload.get("text") or ""
         if verdict in ("scam", "confirm_scam"):
             sender = payload.get("sender") or ""
             if sender:
                 new_count = sender_reputation.report_sender(sender, category="scam")
-            text = payload.get("text") or ""
             if text:
                 rec = community_db.report_scam(text, category=payload.get("category", "scam"))
                 community_count = rec.count
+        elif verdict in ("false_positive", "legitimate", "safe"):
+            # User says we got it wrong — drop any previously-stored
+            # template (and its near neighbors) so we don't keep flagging it.
+            if text:
+                removed = community_db.report_false_positive(text)
     except Exception as exc:  # noqa: BLE001
         log.warning("feedback updates failed: %s", exc)
 
@@ -570,6 +576,7 @@ async def submit_feedback(payload: dict):
         "status": "received",
         "sender_report_count": new_count,
         "community_report_count": community_count,
+        "community_removed": removed,
     }
 
 

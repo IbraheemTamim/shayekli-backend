@@ -140,6 +140,11 @@ class ScamRecord:
 _local_index: dict[int, ScamRecord] = {}
 _loaded = False
 
+# Don't fingerprint trivially-short messages — "مرحبا" alone produces a
+# SimHash that matches every other 5-char Arabic greeting. Anything below
+# this threshold is silently dropped on report and can't trigger a match.
+MIN_TEMPLATE_CHARS = int(os.environ.get("COMMUNITY_MIN_TEMPLATE_CHARS", "20"))
+
 
 def _firestore() -> "object | None":
     if not os.environ.get("FIRESTORE_PROJECT_ID"):
@@ -186,7 +191,11 @@ def report_scam(text: str, category: str = "scam") -> ScamRecord:
     _load_local()
     template = strip_personal_data(text)
     h = simhash(template)
-    if h == 0:
+    if h == 0 or len(template) < MIN_TEMPLATE_CHARS:
+        log.info(
+            "Skipping community report — template too short (%s chars).",
+            len(template),
+        )
         return ScamRecord(simhash=0, category=category, count=0, first_seen=0.0, last_seen=0.0)
 
     fc = _firestore()
@@ -233,6 +242,51 @@ class MatchResult:
     matched: bool
     record: Optional[ScamRecord]
     distance: int
+
+
+def report_false_positive(text: str) -> bool:
+    """
+    Remove a previously-stored scam template (if any). Used when a user
+    taps "خطأ — آمنة" on a result. Returns True if anything was removed.
+
+    Removes the exact-hash AND any near-neighbor within HAMMING_THRESHOLD
+    so the user's "this is fine" verdict applies to the entire fuzzy
+    cluster, not just the precise wording they typed today.
+    """
+    _load_local()
+    template = strip_personal_data(text)
+    h = simhash(template)
+    if h == 0:
+        return False
+
+    removed = False
+
+    fc = _firestore()
+    if fc is not None:
+        try:
+            doc = fc.collection("community_scams").document(str(h))
+            if doc.get().exists:
+                doc.delete()
+                removed = True
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Firestore delete failed: %s", exc)
+
+    # Local index — drop anything within Hamming threshold.
+    to_drop = [stored for stored in list(_local_index.keys()) if hamming(stored, h) <= HAMMING_THRESHOLD]
+    for stored in to_drop:
+        _local_index.pop(stored, None)
+        removed = True
+
+    if to_drop:
+        # Rewrite the JSONL without the removed entries.
+        try:
+            with LOCAL_PATH.open("w", encoding="utf-8") as f:
+                for rec in _local_index.values():
+                    f.write(json.dumps(rec.to_dict()) + "\n")
+        except Exception as exc:  # noqa: BLE001
+            log.warning("community_db rewrite failed: %s", exc)
+
+    return removed
 
 
 def lookup(text: str) -> MatchResult:
