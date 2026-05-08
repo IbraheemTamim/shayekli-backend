@@ -17,6 +17,12 @@ python-whois>=0.9.4
 # fall back to local file storage when FIRESTORE_PROJECT_ID isn't set).
 google-cloud-firestore>=2.16
 
+# Phase 2b runtime — AraBERT ONNX inference. Lightweight: tokenizers is
+# pure Rust (no transformers/torch dep), onnxruntime is ~12 MB.
+onnxruntime>=1.18
+tokenizers>=0.19
+numpy>=1.26
+
 # camel-tools is optional at runtime (preprocess.py falls back to regex
 # if it's missing). It's heavy (~200MB of MADAMIRA models on first use).
 # Uncomment to enable on Railway, OR install locally for retraining only.

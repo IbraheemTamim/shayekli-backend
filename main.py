@@ -176,17 +176,38 @@ model = None
 
 @app.on_event("startup")
 def load_model() -> None:
+    """
+    Boot order:
+      1. If MODEL_DOWNLOAD_URL + MODEL_TOKENIZER_URL are set, download +
+         load the AraBERT ONNX classifier (Phase 2b — preferred path).
+      2. Otherwise fall back to the legacy scikit-learn pickle.
+      3. If neither is available, leave `model` as None and serve 503.
+    """
     global model
+
+    onnx_url = os.environ.get("MODEL_DOWNLOAD_URL", "").strip()
+    tokenizer_url = os.environ.get("MODEL_TOKENIZER_URL", "").strip()
+    if onnx_url and tokenizer_url:
+        try:
+            from arabert_classifier import ArabertClassifier, prepare_files
+
+            onnx_path, tok_path = prepare_files(onnx_url, tokenizer_url)
+            model = ArabertClassifier(onnx_path, tok_path)
+            log.info("Loaded AraBERT ONNX classifier (version=%s).", MODEL_VERSION)
+            return
+        except Exception as exc:  # noqa: BLE001
+            log.error("AraBERT load failed: %s — falling back to legacy pkl.", exc, exc_info=True)
+
     if os.path.exists(MODEL_PATH):
         try:
             with open(MODEL_PATH, "rb") as f:
                 model = pickle.load(f)
-            log.info("Loaded model from %s (version=%s)", MODEL_PATH, MODEL_VERSION)
+            log.info("Loaded legacy scikit-learn model from %s (version=%s)", MODEL_PATH, MODEL_VERSION)
         except Exception as exc:  # noqa: BLE001
             log.error("Failed to load model: %s", exc)
             model = None
     else:
-        log.warning("Model file not found at %s. /predict will return 503 until trained.", MODEL_PATH)
+        log.warning("No model available (no AraBERT URLs and no %s on disk).", MODEL_PATH)
 
 
 # ---------------------------------------------------------------------------
