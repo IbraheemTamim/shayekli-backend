@@ -21,7 +21,8 @@ from __future__ import annotations
 import os
 from typing import Iterable
 
-from fastapi import HTTPException, Request
+from fastapi import Request
+from fastapi.responses import JSONResponse
 
 # Paths that never require auth — health checks, schema, root.
 PUBLIC_PATHS: set[str] = {
@@ -66,5 +67,11 @@ def install(app, public_extra: Iterable[str] = ()) -> None:
             return await call_next(request)
         provided = _extract_key(request)
         if provided != expected:
-            raise HTTPException(status_code=401, detail="Invalid or missing API key.")
+            # Middlewares can't raise HTTPException (it's outside the
+            # FastAPI handler stack and bubbles up as 500). Return a
+            # proper Response directly.
+            return JSONResponse(
+                status_code=401,
+                content={"detail": "Invalid or missing API key."},
+            )
         return await call_next(request)
