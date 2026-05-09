@@ -62,7 +62,7 @@ CLAUDE_HIGH = float(os.environ.get("CLAUDE_FALLBACK_HIGH", "0.65"))
 
 FEEDBACK_PATH = Path(os.environ.get("FEEDBACK_PATH", "feedback.jsonl"))
 
-ALLOWED_ORIGINS = [o.strip() for o in os.environ.get("ALLOWED_ORIGINS", "*").split(",") if o.strip()]
+ALLOWED_ORIGINS = [o.strip() for o in os.environ.get("ALLOWED_ORIGINS", "").split(",") if o.strip()]
 
 app = FastAPI(
     title="Shayekli AI Backend",
@@ -70,11 +70,17 @@ app = FastAPI(
     version=f"1.0.{MODEL_VERSION}",
 )
 
+# CORS is only meaningful for browser clients. The native RN app doesn't
+# enforce CORS, so we don't need to allow anything by default. Set
+# ALLOWED_ORIGINS env var to your privacy-policy / docs domain when
+# hosting browser-side content. Wildcard origins are deliberately
+# disallowed so a leaked API key (which ships in every APK) can't be
+# used from arbitrary web origins.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=ALLOWED_ORIGINS or ["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=ALLOWED_ORIGINS,
+    allow_methods=["GET", "POST"],
+    allow_headers=["Content-Type", "X-API-Key"],
 )
 
 # Phase 5 — observability + optional auth, in this order:
@@ -716,9 +722,26 @@ async def submit_feedback(payload: dict, request: Request):
         observability.incr("feedback_confirm_scam")
     elif verdict_raw in ("false_positive", "legitimate", "safe"):
         observability.incr("feedback_false_positive")
+
+    # Build a redacted copy of the payload before writing to JSONL —
+    # users sometimes paste OTPs, IBANs, account numbers, full phone
+    # numbers, and currency amounts into the scanner. Persist only the
+    # SimHash template (PII stripped to placeholders, structure intact
+    # for retraining) and a hashed sender. The raw `text` and `sender`
+    # are still available in the in-memory payload for the community_db
+    # write paths below.
+    redacted = dict(payload)
+    raw_text = redacted.get("text") or ""
+    raw_sender = redacted.get("sender") or ""
+    if raw_text:
+        redacted["text"] = community_db.strip_personal_data(raw_text)
+        redacted["text_hash"] = observability.hash_text(raw_text)
+    if raw_sender:
+        redacted["sender"] = observability.hash_sender(raw_sender)
+
     try:
         with FEEDBACK_PATH.open("a", encoding="utf-8") as f:
-            f.write(json.dumps(payload, ensure_ascii=False) + "\n")
+            f.write(json.dumps(redacted, ensure_ascii=False) + "\n")
     except Exception as exc:  # noqa: BLE001
         log.warning("feedback write failed: %s", exc)
 
@@ -772,8 +795,11 @@ def community_debug_postgres():
     """
     Diagnostic-only — returns the runtime state of the Postgres connection
     so you can see why community_db is falling back to local mode without
-    needing to scrape Railway logs.
+    needing to scrape Railway logs. Disabled in production: the API-key
+    gate is not a real auth boundary because the key ships in every APK.
     """
+    if ENVIRONMENT != "development":
+        raise HTTPException(status_code=404, detail="Not found.")
     db_url = os.environ.get("DATABASE_URL", "")
     # Parse out scheme + host only so the diagnostic never leaks credentials
     # (the password lives in the netloc between scheme:// and @).
@@ -831,7 +857,10 @@ async def community_debug_strip(payload: dict):
     Visibility helper for the SimHash matching path. Returns the stripped
     template + 64-bit hash + nearest stored neighbor's Hamming distance.
     Useful when a near-duplicate fails to match and we need to see why.
+    Disabled in production — exposes a SimHash-bypass calibration oracle.
     """
+    if ENVIRONMENT != "development":
+        raise HTTPException(status_code=404, detail="Not found.")
     text = (payload or {}).get("text") or ""
     if not text:
         raise HTTPException(status_code=400, detail="Text is required.")
