@@ -709,9 +709,12 @@ async def submit_feedback(payload: dict, request: Request):
     payload = dict(payload or {})
     payload["model_version"] = MODEL_VERSION
     verdict_raw = str(payload.get("verdict", "")).lower()
-    if verdict_raw in ("scam", "confirm_scam"):
+    # `missed_scam` (AI said safe, user disagrees) lands in the scam-DB
+    # write path same as confirm_scam. `legitimate` (AI said safe, user
+    # agrees) lands in the safe-DB write path same as false_positive.
+    if verdict_raw in ("scam", "confirm_scam", "missed_scam"):
         observability.incr("feedback_confirm_scam")
-    elif verdict_raw == "false_positive":
+    elif verdict_raw in ("false_positive", "legitimate", "safe"):
         observability.incr("feedback_false_positive")
     try:
         with FEEDBACK_PATH.open("a", encoding="utf-8") as f:
@@ -725,7 +728,7 @@ async def submit_feedback(payload: dict, request: Request):
     try:
         verdict = str(payload.get("verdict", "")).lower()
         text = payload.get("text") or ""
-        if verdict in ("scam", "confirm_scam"):
+        if verdict in ("scam", "confirm_scam", "missed_scam"):
             sender = payload.get("sender") or ""
             if sender:
                 new_count = sender_reputation.report_sender(sender, category="scam")
