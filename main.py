@@ -27,6 +27,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse, JSONResponse
 from pydantic import BaseModel
 from PIL import Image
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
 
 from preprocess import preprocess_arabic, extract_urls
 from url_reputation import analyze_urls, URLReport
@@ -82,6 +84,22 @@ app.add_middleware(
     allow_methods=["GET", "POST"],
     allow_headers=["Content-Type", "X-API-Key"],
 )
+
+
+# Per-IP rate limiter — see Phase A audit. The API key gates abuse only
+# weakly because it ships baked into every APK. Limits below kill trivial
+# single-source spam (DoS, Cloud-Vision-cost amplification, community-DB
+# poisoning) without throttling real users. Key derivation uses the same
+# forwarded-IP approach as _feedback_src so the limiter is consistent
+# with the dedup fingerprint behind a Railway proxy.
+def _rate_limit_key(request: Request) -> str:
+    fwd = (request.headers.get("x-forwarded-for") or "").split(",")[0].strip()
+    return fwd or (request.client.host if request.client else "unknown")
+
+
+limiter = Limiter(key_func=_rate_limit_key)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # Phase 5 — observability + optional auth, in this order:
 #   1. JSON request log + latency metrics (always on)
@@ -578,17 +596,20 @@ def model_version():
 
 
 @app.post("/predict", response_model=PredictionResponse)
-async def predict_sms(request: SMSRequest):
-    return await detect(request.text, request.sender)
+@limiter.limit("200/minute")
+async def predict_sms(request: Request, body: SMSRequest):
+    return await detect(body.text, body.sender)
 
 
 @app.post("/analyze", response_model=PredictionResponse)
-async def analyze_message(request: SMSRequest):
-    return await detect(request.text, request.sender)
+@limiter.limit("200/minute")
+async def analyze_message(request: Request, body: SMSRequest):
+    return await detect(body.text, body.sender)
 
 
 @app.post("/ocr-predict", response_model=PredictionResponse)
-async def predict_image(file: UploadFile = File(...)):
+@limiter.limit("60/minute")
+async def predict_image(request: Request, file: UploadFile = File(...)):
     """
     Image scam detection. OCR pipeline:
       1. Google Cloud Vision (DOCUMENT_TEXT_DETECTION) — preferred.
@@ -706,6 +727,7 @@ def _feedback_src(request: Request) -> str:
 
 
 @app.post("/feedback")
+@limiter.limit("30/minute")
 async def submit_feedback(payload: dict, request: Request):
     """
     User feedback loop (Section 3.6). Persists the feedback to a JSONL
