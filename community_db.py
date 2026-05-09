@@ -219,6 +219,20 @@ def _pg_init_schema() -> None:
                 )
                 """
             )
+            # Scam-side per-source dedup (mirror of community_safe_reports).
+            # Same row counts as one report no matter how many times the same
+            # client taps "correct" or "missed_scam"; the result-screen
+            # "reported by N users" claim now reflects distinct sources.
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS community_scam_reports (
+                    simhash       TEXT NOT NULL,
+                    src           TEXT NOT NULL,
+                    first_seen    DOUBLE PRECISION NOT NULL,
+                    PRIMARY KEY (simhash, src)
+                )
+                """
+            )
             cur.execute(
                 """
                 CREATE TABLE IF NOT EXISTS community_safe_templates (
@@ -248,26 +262,60 @@ def _pg_init_schema() -> None:
         pool.putconn(conn)
 
 
-def _pg_report(h: int, category: str) -> ScamRecord:
+def _pg_report(h: int, category: str, src: Optional[str] = None) -> ScamRecord:
+    """
+    When `src` is provided, dedup against community_scam_reports first.
+    The templates count only increments on a genuinely new source — so
+    multiple taps from the same client don't inflate the "reported by N
+    users" message. With src=None we fall back to the legacy "every call
+    increments" behavior (used by tests and any caller that hasn't been
+    updated).
+    """
     pool = _pg()
     now = time.time()
     conn = pool.getconn()
     try:
         conn.autocommit = True
         with conn.cursor() as cur:
-            cur.execute(
-                """
-                INSERT INTO community_scams (simhash, category, count, first_seen, last_seen)
-                VALUES (%s, %s, 1, %s, %s)
-                ON CONFLICT (simhash) DO UPDATE
-                    SET count = community_scams.count + 1,
-                        last_seen = EXCLUDED.last_seen,
-                        category = COALESCE(community_scams.category, EXCLUDED.category)
-                RETURNING category, count, first_seen, last_seen
-                """,
-                (str(h), category, now, now),
-            )
-            row = cur.fetchone()
+            is_new_src = True
+            if src is not None:
+                cur.execute(
+                    """
+                    INSERT INTO community_scam_reports (simhash, src, first_seen)
+                    VALUES (%s, %s, %s)
+                    ON CONFLICT DO NOTHING
+                    RETURNING simhash
+                    """,
+                    (str(h), src, now),
+                )
+                is_new_src = cur.fetchone() is not None
+
+            if is_new_src:
+                cur.execute(
+                    """
+                    INSERT INTO community_scams (simhash, category, count, first_seen, last_seen)
+                    VALUES (%s, %s, 1, %s, %s)
+                    ON CONFLICT (simhash) DO UPDATE
+                        SET count = community_scams.count + 1,
+                            last_seen = EXCLUDED.last_seen,
+                            category = COALESCE(community_scams.category, EXCLUDED.category)
+                    RETURNING category, count, first_seen, last_seen
+                    """,
+                    (str(h), category, now, now),
+                )
+                row = cur.fetchone()
+            else:
+                # Repeat report from the same source — no count change.
+                cur.execute(
+                    "SELECT category, count, first_seen, last_seen FROM community_scams WHERE simhash = %s",
+                    (str(h),),
+                )
+                row = cur.fetchone()
+                if row is None:
+                    # Reports row exists but templates row doesn't — partial
+                    # failure recovery; treat as fresh.
+                    return ScamRecord(simhash=h, category=category, count=1, first_seen=now, last_seen=now)
+
             return ScamRecord(
                 simhash=h,
                 category=row[0],
@@ -558,8 +606,15 @@ def _persist_local_safe(rec: ScamRecord) -> None:
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
-def report_scam(text: str, category: str = "scam") -> ScamRecord:
-    """Record (or increment) a confirmed-scam template."""
+def report_scam(text: str, category: str = "scam", src: Optional[str] = None) -> ScamRecord:
+    """
+    Record (or increment) a confirmed-scam template.
+
+    `src` is an opaque per-reporter fingerprint (e.g. hashed IP+UA). When
+    provided, repeat reports from the same src don't increment the count,
+    so "reported by N users" reflects N distinct sources rather than N
+    raw taps and a single client can't inflate the row.
+    """
     template = strip_personal_data(text)
     h = simhash(template)
     if h == 0 or len(template) < MIN_TEMPLATE_CHARS:
@@ -572,7 +627,7 @@ def report_scam(text: str, category: str = "scam") -> ScamRecord:
     # Postgres-first when available (Railway-managed, persistent, atomic).
     if _pg() is not None:
         try:
-            return _pg_report(h, category)
+            return _pg_report(h, category, src)
         except Exception as exc:  # noqa: BLE001
             log.warning("Postgres community report failed (%s) — falling back.", exc)
 

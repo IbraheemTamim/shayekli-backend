@@ -733,7 +733,11 @@ async def submit_feedback(payload: dict, request: Request):
             if sender:
                 new_count = sender_reputation.report_sender(sender, category="scam")
             if text:
-                rec = community_db.report_scam(text, category=payload.get("category", "scam"))
+                rec = community_db.report_scam(
+                    text,
+                    category=payload.get("category", "scam"),
+                    src=_feedback_src(request),
+                )
                 community_count = rec.count
         elif verdict in ("false_positive", "legitimate", "safe"):
             # User says we got it wrong — drop any previously-stored
