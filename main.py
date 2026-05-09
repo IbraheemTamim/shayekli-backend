@@ -724,6 +724,8 @@ async def submit_feedback(payload: dict, request: Request):
 
     new_count = None
     community_count = None
+    community_src_was_new = None
+    community_backend = None
     removed = False
     try:
         verdict = str(payload.get("verdict", "")).lower()
@@ -739,6 +741,8 @@ async def submit_feedback(payload: dict, request: Request):
                     src=_feedback_src(request),
                 )
                 community_count = rec.count
+                community_src_was_new = getattr(rec, "is_new_src", None)
+                community_backend = getattr(rec, "backend", None)
         elif verdict in ("false_positive", "legitimate", "safe"):
             # User says we got it wrong — drop any previously-stored
             # template (and its near neighbors) so we don't keep flagging it.
@@ -759,6 +763,10 @@ async def submit_feedback(payload: dict, request: Request):
         "sender_report_count": new_count,
         "community_report_count": community_count,
         "community_removed": removed,
+        # Diagnostic — surfaces which storage path ran (postgres / firestore /
+        # local) and whether the per-source dedup considered this a new src.
+        "community_src_was_new": community_src_was_new,
+        "community_backend": community_backend,
     }
 
 

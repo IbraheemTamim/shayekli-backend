@@ -319,15 +319,24 @@ def _pg_report(h: int, category: str, src: Optional[str] = None) -> ScamRecord:
                 if row is None:
                     # Reports row exists but templates row doesn't — partial
                     # failure recovery; treat as fresh.
-                    return ScamRecord(simhash=h, category=category, count=1, first_seen=now, last_seen=now)
+                    rec_partial = ScamRecord(simhash=h, category=category, count=1, first_seen=now, last_seen=now)
+                    rec_partial.is_new_src = True  # type: ignore[attr-defined]
+                    rec_partial.backend = "postgres"  # type: ignore[attr-defined]
+                    return rec_partial
 
-            return ScamRecord(
+            rec = ScamRecord(
                 simhash=h,
                 category=row[0],
                 count=int(row[1]),
                 first_seen=float(row[2]),
                 last_seen=float(row[3]),
             )
+            # Runtime-only metadata — used by /feedback to surface dedup
+            # state in the response and figure out whether Postgres-path
+            # ran. Not persisted (asdict ignores undeclared attributes).
+            rec.is_new_src = is_new_src  # type: ignore[attr-defined]
+            rec.backend = "postgres"  # type: ignore[attr-defined]
+            return rec
     finally:
         pool.putconn(conn)
 
@@ -654,13 +663,16 @@ def report_scam(text: str, category: str = "scam", src: Optional[str] = None) ->
                 merge=True,
             )
             snap = doc.get()
-            return ScamRecord(
+            rec_fs = ScamRecord(
                 simhash=h,
                 category=str(snap.get("category") or category),
                 count=int(snap.get("count") or 1),
                 first_seen=float(snap.get("first_seen") or now),
                 last_seen=float(snap.get("last_seen") or now),
             )
+            rec_fs.is_new_src = True  # type: ignore[attr-defined]
+            rec_fs.backend = "firestore"  # type: ignore[attr-defined]
+            return rec_fs
         except Exception as exc:  # noqa: BLE001
             log.warning("Firestore community_db write failed: %s", exc)
 
@@ -673,6 +685,8 @@ def report_scam(text: str, category: str = "scam", src: Optional[str] = None) ->
         rec.last_seen = now
     _local_index[h] = rec
     _persist_local(rec)
+    rec.is_new_src = True  # type: ignore[attr-defined]
+    rec.backend = "local"  # type: ignore[attr-defined]
     return rec
 
 
