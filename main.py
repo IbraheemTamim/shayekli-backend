@@ -775,6 +775,53 @@ def community_stats():
     return community_db.stats()
 
 
+@app.get("/community/debug-postgres")
+def community_debug_postgres():
+    """
+    Diagnostic-only — returns the runtime state of the Postgres connection
+    so you can see why community_db is falling back to local mode without
+    needing to scrape Railway logs.
+    """
+    db_url = os.environ.get("DATABASE_URL", "")
+    info = {
+        "database_url_set": bool(db_url),
+        "database_url_length": len(db_url),
+        "database_url_prefix": (db_url[:30] + "...") if db_url else None,
+        "database_url_looks_like_pg": db_url.startswith(("postgres://", "postgresql://")),
+        "database_url_looks_unresolved": "${{" in db_url,
+    }
+    try:
+        from psycopg2.pool import SimpleConnectionPool  # noqa: F401
+        info["psycopg2_importable"] = True
+    except Exception as exc:  # noqa: BLE001
+        info["psycopg2_importable"] = False
+        info["psycopg2_import_error"] = repr(exc)
+
+    pool = community_db._pg()
+    info["pool_acquired"] = pool is not None
+    info["pg_init_done"] = community_db._pg_init_done
+
+    if pool is not None:
+        try:
+            conn = pool.getconn()
+            try:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "SELECT table_name FROM information_schema.tables "
+                        "WHERE table_schema='public' "
+                        "AND table_name IN ('community_scams','community_scam_reports',"
+                        "'community_safe_templates','community_safe_reports') "
+                        "ORDER BY table_name"
+                    )
+                    info["tables_present"] = [r[0] for r in cur.fetchall()]
+            finally:
+                pool.putconn(conn)
+        except Exception as exc:  # noqa: BLE001
+            info["test_query_error"] = repr(exc)
+
+    return info
+
+
 @app.post("/community/debug-strip")
 async def community_debug_strip(payload: dict):
     """
