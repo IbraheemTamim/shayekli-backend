@@ -724,8 +724,6 @@ async def submit_feedback(payload: dict, request: Request):
 
     new_count = None
     community_count = None
-    community_src_was_new = None
-    community_backend = None
     removed = False
     try:
         verdict = str(payload.get("verdict", "")).lower()
@@ -741,8 +739,6 @@ async def submit_feedback(payload: dict, request: Request):
                     src=_feedback_src(request),
                 )
                 community_count = rec.count
-                community_src_was_new = getattr(rec, "is_new_src", None)
-                community_backend = getattr(rec, "backend", None)
         elif verdict in ("false_positive", "legitimate", "safe"):
             # User says we got it wrong — drop any previously-stored
             # template (and its near neighbors) so we don't keep flagging it.
@@ -763,10 +759,6 @@ async def submit_feedback(payload: dict, request: Request):
         "sender_report_count": new_count,
         "community_report_count": community_count,
         "community_removed": removed,
-        # Diagnostic — surfaces which storage path ran (postgres / firestore /
-        # local) and whether the per-source dedup considered this a new src.
-        "community_src_was_new": community_src_was_new,
-        "community_backend": community_backend,
     }
 
 
@@ -783,10 +775,21 @@ def community_debug_postgres():
     needing to scrape Railway logs.
     """
     db_url = os.environ.get("DATABASE_URL", "")
+    # Parse out scheme + host only so the diagnostic never leaks credentials
+    # (the password lives in the netloc between scheme:// and @).
+    sanitized_host = None
+    if db_url:
+        try:
+            from urllib.parse import urlparse
+            p = urlparse(db_url)
+            if p.hostname:
+                sanitized_host = f"{p.scheme}://{p.hostname}" + (f":{p.port}" if p.port else "")
+        except Exception:  # noqa: BLE001
+            sanitized_host = None
     info = {
         "database_url_set": bool(db_url),
         "database_url_length": len(db_url),
-        "database_url_prefix": (db_url[:30] + "...") if db_url else None,
+        "database_url_host": sanitized_host,
         "database_url_looks_like_pg": db_url.startswith(("postgres://", "postgresql://")),
         "database_url_looks_unresolved": "${{" in db_url,
     }

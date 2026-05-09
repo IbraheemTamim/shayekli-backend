@@ -290,11 +290,6 @@ def _pg_report(h: int, category: str, src: Optional[str] = None) -> ScamRecord:
                 )
                 is_new_src = cur.fetchone() is not None
 
-            log.info(
-                "scam_report DEBUG: simhash=%s src=%s is_new_src=%s",
-                str(h)[:12], (src or "<none>")[:8], is_new_src,
-            )
-
             if is_new_src:
                 cur.execute(
                     """
