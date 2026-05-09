@@ -21,7 +21,8 @@ import asyncio
 from pathlib import Path
 from typing import Any, List, Optional
 
-from fastapi import FastAPI, HTTPException, UploadFile, File
+import hashlib
+from fastapi import FastAPI, HTTPException, UploadFile, File, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse, JSONResponse
 from pydantic import BaseModel
@@ -160,6 +161,10 @@ class PredictionResponse(BaseModel):
     # For /ocr-predict: the actual text Cloud Vision lifted from the image,
     # so the result screen can show what was scanned instead of a placeholder.
     extracted_text: Optional[str] = None
+    # "none" (safe verdict, reasons are informational at most), "warning"
+    # (uncertain 40–60 band — UI should render reasons as soft warnings),
+    # or "threat" (≥60 — UI shows red). Drives the result-screen tone.
+    reasons_severity: str = "threat"
 
 
 class HealthResponse(BaseModel):
@@ -278,9 +283,11 @@ def _fuse(
     classifier_prob: float,
     url_reports: list[URLReport],
     claude_result: dict[str, Any] | None,
+    scam_threshold: float = 50.0,
 ) -> tuple[float, bool, str, list[str], list[str]]:
     """
     Returns (final_risk_0_to_100, is_scam, risk_label_message, reasons_ar, pipeline_steps).
+    `scam_threshold` lets the OCR path raise the bar above the default 50.
     """
     pipeline = ["preprocess", "classifier"]
     reasons: list[str] = []
@@ -314,7 +321,7 @@ def _fuse(
                 reasons.append(f)
 
     risk = round(max(0.0, min(100.0, risk)), 2)
-    is_scam = risk >= 50.0
+    is_scam = risk >= scam_threshold
     label, message = _risk_label(risk)
     return risk, is_scam, message, reasons, pipeline
 
@@ -322,7 +329,14 @@ def _fuse(
 async def detect(
     raw_text: str,
     sender: Optional[str] = None,
+    source: str = "text",
 ) -> PredictionResponse:
+    """
+    `source` shifts thresholds for noisy inputs. "ocr" dampens the AraBERT
+    classifier output by 0.80 and raises the scam threshold from 50→60 to
+    compensate for OCR fragmentation (typos, broken Arabic, no conversational
+    context). Default "text" preserves the existing SMS / notification path.
+    """
     observability.incr("predict_total")
     detect_start = __import__("time").perf_counter()
     if model is None:
@@ -331,6 +345,9 @@ async def detect(
     if not raw_text or not raw_text.strip():
         observability.incr("predict_error")
         raise HTTPException(status_code=400, detail="Text cannot be empty.")
+
+    is_ocr = source == "ocr"
+    scam_threshold = 60.0 if is_ocr else 50.0
 
     # Community SimHash lookup — short-circuits the pipeline if this
     # message matches a previously reported scam template.
@@ -354,11 +371,54 @@ async def detect(
             model_version=MODEL_VERSION,
         )
 
+    # 5.2.C — Community safe-template short-circuit. Cross-device trust:
+    # when N users have confirmed a template is safe, future scans of the
+    # same template skip the whole pipeline. Two abuse mitigations:
+    #   1. lookup_safe enforces COMMUNITY_SAFE_MIN_COUNT distinct reports
+    #      (default 2) before honoring a match — single bad-actor reports
+    #      sit dormant.
+    #   2. URL reputation overrides the whitelist: if any URL in the
+    #      message scores ≥50 we fall through to the normal pipeline so a
+    #      Safe-Browsing-flagged phishing link can't be whitelisted.
+    url_reports: list[URLReport] | None = None
+    try:
+        safe_match = community_db.lookup_safe(raw_text)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("safe-template lookup failed: %s", exc)
+        safe_match = None
+    if safe_match is not None and safe_match.matched and safe_match.record is not None:
+        if extract_urls(raw_text):
+            url_reports = await _gather_url_reports(raw_text)
+            max_url_risk = max((r.risk_score for r in url_reports), default=0)
+            honor = max_url_risk < 50
+        else:
+            url_reports = []
+            honor = True
+        if honor:
+            return PredictionResponse(
+                is_scam=False,
+                risk_level="LOW",
+                confidence=5.0,
+                message="آمن: لا يوجد خطر واضح",
+                reasons=["تم تأكيد أمان هذه الرسالة من قِبَل المستخدمين."],
+                urls=[URLReportOut(**r.to_dict()) for r in url_reports],
+                sender_report=None,
+                used_claude=False,
+                pipeline=["preprocess", "community_safe_match"],
+                model_version=MODEL_VERSION,
+                reasons_severity="none",
+            )
+        # URL flagged → drop to the normal pipeline; reuse url_reports below.
+
     clean = preprocess_arabic(raw_text)
     classifier_prob, _ = _run_classifier(clean if clean else raw_text)
+    if is_ocr:
+        classifier_prob *= 0.80
 
-    # URL reputation runs in parallel with the (sync) classifier above.
-    url_reports = await _gather_url_reports(raw_text)
+    # URL reputation runs in parallel with the (sync) classifier above
+    # (skipped if already gathered for the safe-template URL guard).
+    if url_reports is None:
+        url_reports = await _gather_url_reports(raw_text)
 
     # Heuristic reasons from raw text (keywords, urgency etc.).
     reasons_local = heuristic_flags(raw_text)
@@ -384,12 +444,39 @@ async def detect(
         except Exception as exc:  # noqa: BLE001
             log.warning("Claude consult failed: %s", exc)
 
-    risk, is_scam, message, reasons_pipeline, steps = _fuse(classifier_prob, url_reports, claude_result)
+    risk, is_scam, message, reasons_pipeline, steps = _fuse(
+        classifier_prob, url_reports, claude_result, scam_threshold=scam_threshold
+    )
+    if is_ocr:
+        steps.append("ocr_dampening")
 
-    # Combine local heuristics with the pipeline's reasons; dedup, keep order.
+    # Fold the sender's risk into the final score before deciding which
+    # reasons to surface — the severity bucket below depends on this.
+    if sender_report and sender_report.risk_score:
+        risk = max(risk, min(100.0, risk + sender_report.risk_score * 0.3))
+        is_scam = risk >= scam_threshold
+        _, message = _risk_label(risk)
+        steps.append("sender_reputation")
+
+    # 5.2.A — heuristic flag suppression for safe verdicts.
+    # Pipeline reasons (URL reputation, Claude) are authoritative; always keep.
+    # Local reasons (regex heuristics, sender heuristics) are noisy on safe
+    # verdicts — drop them when fused risk < 40 so the result screen doesn't
+    # show red flags next to a green badge. In the 40–60 band the verdict is
+    # uncertain so we keep them but tag the response as "warning" for the UI.
+    if risk < 40.0:
+        reasons_to_use: list[str] = list(reasons_pipeline)
+        reasons_severity = "none"
+    elif risk < 60.0:
+        reasons_to_use = list(reasons_local) + list(reasons_pipeline)
+        reasons_severity = "warning"
+    else:
+        reasons_to_use = list(reasons_local) + list(reasons_pipeline)
+        reasons_severity = "threat"
+
     seen: set[str] = set()
     reasons: list[str] = []
-    for r in (reasons_local + reasons_pipeline):
+    for r in reasons_to_use:
         if r and r not in seen:
             reasons.append(r)
             seen.add(r)
@@ -398,13 +485,6 @@ async def detect(
             reasons.append("تعرّف الذكاء الاصطناعي على أسلوب صياغة مشبوه.")
         else:
             reasons.append("لم يتم العثور على أنماط مشبوهة أو روابط خبيثة.")
-
-    # Fold the sender's risk into the final score (modest weight).
-    if sender_report and sender_report.risk_score:
-        risk = max(risk, min(100.0, risk + sender_report.risk_score * 0.3))
-        is_scam = risk >= 50.0
-        _, message = _risk_label(risk)
-        steps.append("sender_reputation")
 
     detect_latency_ms = round((__import__("time").perf_counter() - detect_start) * 1000.0, 2)
     observability.observe_latency("predict.detect", detect_latency_ms)
@@ -437,6 +517,7 @@ async def detect(
         used_claude=claude_result is not None,
         pipeline=steps,
         model_version=MODEL_VERSION,
+        reasons_severity=reasons_severity,
     )
 
 
@@ -592,7 +673,7 @@ async def predict_image(file: UploadFile = File(...)):
             pipeline=[f"ocr:{ocr_engine}"] if ocr_engine else [],
         )
 
-    response = await detect(text)
+    response = await detect(text, source="ocr")
     if ocr_engine:
         response.pipeline = [f"ocr:{ocr_engine}", *response.pipeline]
     # Surface the extracted text so the client can show it on the result
@@ -604,8 +685,22 @@ async def predict_image(file: UploadFile = File(...)):
 # ---------------------------------------------------------------------------
 # Feedback & OTA
 # ---------------------------------------------------------------------------
+def _feedback_src(request: Request) -> str:
+    """
+    Opaque per-reporter fingerprint for community_db abuse mitigation
+    (5.2.C). Hash of (forwarded IP, User-Agent) — never returned to clients,
+    only used to dedup safe-template reports so a single user can't push a
+    real scam onto the whitelist by tapping repeatedly. NAT collapses
+    multiple users behind the same proxy; that's the known trade-off.
+    """
+    fwd = (request.headers.get("x-forwarded-for") or "").split(",")[0].strip()
+    ip = fwd or (request.client.host if request.client else "")
+    ua = request.headers.get("user-agent", "")
+    return hashlib.sha256(f"{ip}|{ua}".encode("utf-8")).hexdigest()[:16]
+
+
 @app.post("/feedback")
-async def submit_feedback(payload: dict):
+async def submit_feedback(payload: dict, request: Request):
     """
     User feedback loop (Section 3.6). Persists the feedback to a JSONL
     file and, when the user confirmed a scam AND included a sender,
@@ -642,6 +737,13 @@ async def submit_feedback(payload: dict):
             # template (and its near neighbors) so we don't keep flagging it.
             if text:
                 removed = community_db.report_false_positive(text)
+                # 5.2.C — also record this template as community-safe so
+                # other users get a clean verdict on the same template
+                # immediately. The whitelist activates only after
+                # COMMUNITY_SAFE_MIN_COUNT distinct reports (per-source
+                # deduped, so the same client tapping repeatedly counts
+                # as one).
+                community_db.report_safe(text, src=_feedback_src(request))
     except Exception as exc:  # noqa: BLE001
         log.warning("feedback updates failed: %s", exc)
 
