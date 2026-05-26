@@ -1,0 +1,362 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<title>سياسة الخصوصية — شيّكلي / Privacy Policy — Shayekli</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Cairo", "Helvetica Neue", Arial, sans-serif;
+    background: #fafafa;
+    color: #1a1a1a;
+    line-height: 1.7;
+    max-width: 780px;
+    margin: 0 auto;
+    padding: 40px 24px 80px;
+  }
+  h1 { font-size: 28px; margin: 0 0 4px; }
+  h2 { font-size: 20px; margin: 32px 0 8px; color: #0d4d80; }
+  h3 { font-size: 16px; margin: 20px 0 6px; }
+  p, li { font-size: 15px; }
+  .meta {
+    color: #666;
+    font-size: 14px;
+    margin: 0 0 24px;
+  }
+  ul { padding-inline-start: 24px; }
+  hr {
+    border: 0;
+    border-top: 1px solid #ddd;
+    margin: 56px 0 32px;
+  }
+  .lang-en {
+    direction: ltr;
+    text-align: left;
+  }
+  a { color: #0d4d80; }
+  code, .code { font-family: "JetBrains Mono", "Consolas", monospace; background: #eee; padding: 1px 4px; border-radius: 3px; font-size: 13px; }
+</style>
+</head>
+<body>
+
+<!-- ============================================================== -->
+<!-- ARABIC VERSION (primary, since the app is Arabic-first)         -->
+<!-- ============================================================== -->
+<section dir="rtl" lang="ar">
+  <h1>سياسة الخصوصية — تطبيق شيّكلي</h1>
+  <p class="meta">آخر تحديث: 12 أيار / مايو 2026</p>
+
+  <p>
+    يحترم تطبيق <strong>شيّكلي (Shayekli)</strong> خصوصية مستخدميه. هذه السياسة توضح
+    ما هي البيانات التي يجمعها التطبيق، وكيف يستخدمها، ومع من يشاركها، وما هي حقوقك
+    تجاه بياناتك.
+  </p>
+
+  <h2>1. من نحن</h2>
+  <p>
+    شيّكلي تطبيق ذكاء اصطناعي عربي مصمم لاكتشاف رسائل وروابط وصور الاحتيال
+    والتصيد الاحتيالي والتحذير منها قبل وقوع المستخدم في الفخ. التطبيق موجّه
+    للمستخدمين الناطقين بالعربية، خاصةً اللهجة الفلسطينية واللهجات الشامية.
+  </p>
+
+  <h2>2. ما هي البيانات التي يجمعها التطبيق</h2>
+  <p>عند استخدام التطبيق، قد يتم جمع البيانات التالية بأذنك الصريح:</p>
+  <ul>
+    <li>
+      <strong>نصوص الرسائل القصيرة (SMS):</strong> عند تفعيل خاصية الفحص التلقائي،
+      يقرأ التطبيق محتوى الرسائل الواردة لفحصها فقط، ولا يقوم بحفظها على جهازك أو
+      على خوادمنا.
+    </li>
+    <li>
+      <strong>إشعارات التطبيقات المراسلة:</strong> عند تفعيل خاصية مراقبة الإشعارات،
+      يقرأ التطبيق نصوص الإشعارات الواردة من تطبيقات محددة فقط (واتساب،
+      تيلجرام، ماسنجر، إنستجرام، فايبر) لفحصها.
+    </li>
+    <li>
+      <strong>الصور:</strong> عند فحص صورة، يتم رفعها مؤقتاً إلى خادمنا الذي يقوم
+      بإرسالها إلى خدمة Google Cloud Vision لاستخراج النص فقط. لا يتم حفظ الصورة
+      أو النص المستخرج بعد انتهاء الفحص.
+    </li>
+    <li>
+      <strong>أرقام الهواتف:</strong> عند تحليل رسالة، يتم إرسال رقم المُرسِل إلى
+      خادمنا لفحص سمعته. يتم تشفير الرقم بدالة هاش (SHA-256) قبل تخزينه، ولا يتم
+      الاحتفاظ بالرقم الأصلي.
+    </li>
+    <li>
+      <strong>تقارير الأعطال (اختياري):</strong> عند حدوث خطأ في التطبيق، قد يتم
+      إرسال تقرير عطل إلى خدمة Sentry لتحسين الاستقرار. التقارير لا تحتوي على
+      محتوى الرسائل.
+    </li>
+    <li>
+      <strong>تقييم المستخدم:</strong> عندما تضغط على زر "صحيح" أو "خطأ — آمنة" بعد
+      الفحص، يُسجَّل قرارك مع نسخة معالجة من نص الرسالة (تُستبدل أرقام الهواتف
+      والمبالغ المالية والروابط بكلمات عامة) لتحسين دقة التطبيق مستقبلاً.
+    </li>
+  </ul>
+
+  <h2>3. كيف نستخدم بياناتك</h2>
+  <ul>
+    <li>تحليل الرسائل والروابط والصور باستخدام نموذج ذكاء اصطناعي عربي (AraBERT) للكشف عن الاحتيال.</li>
+    <li>التحقق من سلامة الروابط باستخدام خدمات سمعة عالمية (انظر القسم 4).</li>
+    <li>بناء قاعدة بيانات مجتمعية للقوالب الاحتيالية المعروفة لحماية المستخدمين الآخرين.</li>
+    <li>تحسين دقة نماذج الكشف من خلال التقييم الذي يقدمه المستخدمون.</li>
+  </ul>
+  <p><strong>لا نستخدم بياناتك للإعلانات، ولا نبيعها لأي طرف ثالث.</strong></p>
+
+  <h2>4. مع من نشارك بياناتك</h2>
+  <p>
+    لتقديم خدمة الكشف عن الاحتيال، يقوم خادمنا بإرسال بيانات محدودة إلى الخدمات
+    الخارجية التالية:
+  </p>
+  <ul>
+    <li>
+      <strong>Google Cloud Vision:</strong> صور المستخدم تُرسَل لاستخراج النص منها
+      فقط. لا تُحفظ على خوادم Google بعد المعالجة.
+    </li>
+    <li>
+      <strong>Google Safe Browsing:</strong> عناوين الروابط (URL) فقط، لفحصها مقابل
+      قاعدة بيانات Google للروابط الخبيثة.
+    </li>
+    <li>
+      <strong>VirusTotal:</strong> عناوين الروابط فقط، لفحصها مقابل عشرات محركات
+      الكشف عن البرمجيات الخبيثة.
+    </li>
+    <li>
+      <strong>PhishTank:</strong> عناوين الروابط فقط، لفحصها مقابل قاعدة بيانات
+      مجتمعية للروابط الاحتيالية.
+    </li>
+    <li>
+      <strong>Cloudflare DNS (1.1.1.1):</strong> عند تفعيل خدمة VPN المحلية، يتم
+      توجيه استعلامات DNS النظيفة فقط (التي ليست في قائمة الحظر) إلى خوادم
+      Cloudflare. هذه استعلامات كان جهازك سيرسلها على أي حال.
+    </li>
+    <li>
+      <strong>Sentry (تقارير الأعطال):</strong> فقط في حال حدوث عطل، وتقارير
+      الأعطال لا تحتوي على محتوى رسائل المستخدم.
+    </li>
+  </ul>
+  <p>
+    جميع الاتصالات بين تطبيقك وخوادمنا مشفّرة باستخدام HTTPS.
+  </p>
+
+  <h2>5. كيف نحمي بياناتك</h2>
+  <ul>
+    <li>التشفير الكامل أثناء النقل (HTTPS / TLS).</li>
+    <li>تشفير أرقام الهواتف بدالة هاش (SHA-256) قبل تخزينها.</li>
+    <li>تشفير محتوى الرسائل في السجلات الداخلية (لا يُحفظ النص الخام أبداً).</li>
+    <li>يُخزَّن في قاعدة البيانات المجتمعية بصمة رقمية (SimHash) من القالب فقط، وليس النص الأصلي.</li>
+    <li>البيانات الشخصية (الأرقام، المبالغ، الروابط، الرموز السرية OTP) تُحذف
+        تلقائياً من القوالب المُجمَّعة قبل تخزينها.</li>
+    <li>لا نحتفظ بأي صورة أو نص رسالة بعد الانتهاء من تحليلها.</li>
+  </ul>
+
+  <h2>6. حقوقك</h2>
+  <ul>
+    <li>
+      <strong>الحذف:</strong> إلغاء تثبيت التطبيق يحذف جميع البيانات المحلية المرتبطة
+      بك من جهازك فوراً. لطلب حذف أي بصمة مرتبطة بك من خوادمنا، راسلنا على
+      البريد المذكور أدناه.
+    </li>
+    <li>
+      <strong>المعرفة:</strong> يحق لك معرفة ما إذا كانت لدينا أي بيانات مرتبطة بك،
+      ونقدّمها لك مجاناً.
+    </li>
+    <li>
+      <strong>التعديل:</strong> إذا اعتقدت أن بياناتك غير صحيحة، راسلنا وسنصححها أو
+      نحذفها.
+    </li>
+    <li>
+      <strong>الانسحاب:</strong> يمكنك تعطيل أي خاصية في التطبيق (الفحص التلقائي،
+      الإشعارات، الصور، VPN) في أي وقت من شاشة الإعدادات.
+    </li>
+  </ul>
+
+  <h2>7. الأطفال</h2>
+  <p>
+    التطبيق ليس موجَّهاً للأطفال دون سن 13 سنة. لا نجمع عن قصد بيانات من أي شخص
+    دون هذا السن. إذا اكتشفت أن طفلك يستخدم التطبيق، يرجى التواصل معنا لحذف
+    بياناته.
+  </p>
+
+  <h2>8. التحديثات على هذه السياسة</h2>
+  <p>
+    قد نقوم بتحديث هذه السياسة من وقت لآخر. ستجد دائماً النسخة المحدّثة على هذه
+    الصفحة، مع تاريخ آخر تحديث في أعلى الصفحة. التغييرات الجوهرية ستُبلَّغ
+    للمستخدمين داخل التطبيق.
+  </p>
+
+  <h2>9. الاتصال بنا</h2>
+  <p>
+    لأي سؤال حول الخصوصية، أو لطلب حذف بياناتك، أو لأي تقرير عن مشكلة:
+  </p>
+  <ul>
+    <li>البريد الإلكتروني: <a href="mailto:support@shayekli.app">support@shayekli.app</a></li>
+    <li>طلبات الخصوصية: <a href="mailto:privacy@shayekli.app">privacy@shayekli.app</a></li>
+  </ul>
+</section>
+
+<hr>
+
+<!-- ============================================================== -->
+<!-- ENGLISH VERSION                                                  -->
+<!-- ============================================================== -->
+<section class="lang-en" dir="ltr" lang="en">
+  <h1>Privacy Policy — Shayekli</h1>
+  <p class="meta">Last updated: May 12, 2026</p>
+
+  <p>
+    <strong>Shayekli</strong> ("we", "the app") respects the privacy of its users. This policy
+    explains what data the app collects, how we use it, who we share it with,
+    and your rights regarding your data.
+  </p>
+
+  <h2>1. Who we are</h2>
+  <p>
+    Shayekli is an Arabic-language AI-powered application designed to detect
+    and warn users about scam, phishing, and fraud attempts arriving via SMS,
+    messaging-app notifications, photos, and URLs. The app targets Arabic
+    speakers, particularly those who use Palestinian and Levantine dialects.
+  </p>
+
+  <h2>2. What data we collect</h2>
+  <p>With your explicit permission, the app may collect the following:</p>
+  <ul>
+    <li>
+      <strong>SMS message content:</strong> when automatic SMS scanning is
+      enabled, the app reads incoming SMS bodies for scam analysis. Bodies are
+      never stored on your device or our servers as raw text.
+    </li>
+    <li>
+      <strong>Messaging app notifications:</strong> when the notification
+      listener is enabled, the app reads notification text from a fixed
+      allowlist of messaging apps (WhatsApp, Telegram, Messenger, Instagram,
+      Viber) for scam analysis.
+    </li>
+    <li>
+      <strong>Photos:</strong> when you scan a photo, it is temporarily
+      uploaded to our server which forwards it to Google Cloud Vision for OCR
+      (text extraction). Neither the photo nor the extracted text is retained
+      after the scan completes.
+    </li>
+    <li>
+      <strong>Phone numbers:</strong> when analyzing a message, the sender's
+      phone number is sent to our server for reputation checking. The number
+      is SHA-256 hashed before any persistent storage; the raw number is
+      never retained.
+    </li>
+    <li>
+      <strong>Crash reports (optional):</strong> if the app crashes, an
+      anonymous report may be sent to Sentry to help us improve stability.
+      Crash reports do not contain message content.
+    </li>
+    <li>
+      <strong>User feedback:</strong> when you tap "Correct" or "Wrong" after
+      a scan, your judgment is recorded along with a sanitized template of
+      the message (phone numbers, amounts, URLs, and OTPs replaced with
+      generic placeholders) to improve future model accuracy.
+    </li>
+  </ul>
+
+  <h2>3. How we use your data</h2>
+  <ul>
+    <li>Analyze messages, URLs, and photos via an Arabic-language AI (AraBERT) classifier to detect scams.</li>
+    <li>Check URL reputation against industry-standard services (see Section 4).</li>
+    <li>Build a community database of known scam templates to protect other users.</li>
+    <li>Improve detection accuracy using user feedback.</li>
+  </ul>
+  <p>
+    <strong>We do not use your data for advertising. We do not sell your data
+    to any third party.</strong>
+  </p>
+
+  <h2>4. Who we share your data with</h2>
+  <p>
+    To provide scam detection, our server transmits limited data to the
+    following third-party services:
+  </p>
+  <ul>
+    <li>
+      <strong>Google Cloud Vision:</strong> photo bytes for OCR. Not retained
+      by Google beyond the request.
+    </li>
+    <li>
+      <strong>Google Safe Browsing:</strong> URL strings only, for reputation
+      lookup against Google's malicious-URL database.
+    </li>
+    <li>
+      <strong>VirusTotal:</strong> URL strings only, for multi-engine
+      reputation lookup.
+    </li>
+    <li>
+      <strong>PhishTank:</strong> URL strings only, against the community
+      anti-phishing database.
+    </li>
+    <li>
+      <strong>Cloudflare DNS (1.1.1.1):</strong> when the local VPN is enabled,
+      clean DNS queries (those not on our blocklist) are forwarded to
+      Cloudflare. These are queries your device would have made anyway.
+    </li>
+    <li>
+      <strong>Sentry (crash reports):</strong> only when a crash occurs, and
+      crash reports never contain message content.
+    </li>
+  </ul>
+  <p>All communication between your device and our servers uses HTTPS / TLS.</p>
+
+  <h2>5. How we protect your data</h2>
+  <ul>
+    <li>Full encryption in transit (HTTPS / TLS).</li>
+    <li>Phone numbers SHA-256 hashed before storage.</li>
+    <li>Message content hashed in server-side logs; raw text is never persisted.</li>
+    <li>Only a 64-bit SimHash fingerprint of the personally-anonymized template is stored in the community database; never the raw message.</li>
+    <li>Personal information (phone numbers, amounts, URLs, OTP codes) are stripped to placeholders before any template is stored.</li>
+    <li>No photos or message text are retained after a scan completes.</li>
+  </ul>
+
+  <h2>6. Your rights</h2>
+  <ul>
+    <li>
+      <strong>Deletion:</strong> uninstalling the app immediately removes all
+      device-local data. To delete any hashed traces associated with you from
+      our servers, contact us at the address below.
+    </li>
+    <li>
+      <strong>Right to know:</strong> you have the right to ask whether we
+      hold any data associated with you. We provide it free of charge.
+    </li>
+    <li>
+      <strong>Right to correct:</strong> if you believe any of your data is
+      incorrect, contact us and we will correct or delete it.
+    </li>
+    <li>
+      <strong>Right to opt out:</strong> you can disable any feature (auto
+      SMS scanning, notification listening, photo scanning, VPN) at any time
+      from the Settings screen.
+    </li>
+  </ul>
+
+  <h2>7. Children</h2>
+  <p>
+    The app is not directed at children under 13. We do not knowingly collect
+    data from anyone under that age. If you believe a minor is using the app,
+    please contact us to delete their data.
+  </p>
+
+  <h2>8. Updates to this policy</h2>
+  <p>
+    We may update this policy from time to time. The current version is
+    always available at this URL, with the "last updated" date at the top.
+    Substantial changes are communicated to users inside the app.
+  </p>
+
+  <h2>9. Contact us</h2>
+  <p>For any privacy-related question, data deletion request, or other concern:</p>
+  <ul>
+    <li>Email: <a href="mailto:support@shayekli.app">support@shayekli.app</a></li>
+    <li>Privacy requests: <a href="mailto:privacy@shayekli.app">privacy@shayekli.app</a></li>
+  </ul>
+</section>
+
+</body>
+</html>
