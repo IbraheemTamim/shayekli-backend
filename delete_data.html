@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<title>طلب حذف البيانات — شيّكلي / Request Data Deletion — Shayekli</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Cairo", "Helvetica Neue", Arial, sans-serif;
+    background: #fafafa;
+    color: #1a1a1a;
+    line-height: 1.7;
+    max-width: 780px;
+    margin: 0 auto;
+    padding: 40px 24px 80px;
+  }
+  h1 { font-size: 28px; margin: 0 0 4px; }
+  h2 { font-size: 20px; margin: 32px 0 8px; color: #0d4d80; }
+  h3 { font-size: 16px; margin: 20px 0 6px; }
+  p, li { font-size: 15px; }
+  .meta { color: #666; font-size: 14px; margin: 0 0 24px; }
+  ul, ol { padding-inline-start: 24px; }
+  hr { border: 0; border-top: 1px solid #ddd; margin: 56px 0 32px; }
+  .lang-en { direction: ltr; text-align: left; }
+  a { color: #0d4d80; }
+  .step {
+    background: #fff;
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    padding: 16px 20px;
+    margin: 12px 0;
+  }
+  code { font-family: "JetBrains Mono", "Consolas", monospace; background: #eee; padding: 1px 4px; border-radius: 3px; font-size: 13px; }
+</style>
+</head>
+<body>
+
+<!-- ============================================================== -->
+<!-- ARABIC VERSION                                                   -->
+<!-- ============================================================== -->
+<section dir="rtl" lang="ar">
+  <h1>طلب حذف البيانات — تطبيق شيّكلي</h1>
+  <p class="meta">آخر تحديث: 12 أيار / مايو 2026</p>
+
+  <p>
+    إذا كنت تستخدم تطبيق <strong>شيّكلي (Shayekli)</strong> وترغب في حذف أي بيانات
+    مرتبطة بك، هذه الصفحة توضح الخطوات الكاملة.
+  </p>
+
+  <h2>1. ما هي البيانات التي يمكن حذفها</h2>
+  <p>تطبيق شيّكلي يحتفظ بنوعين من البيانات:</p>
+  <ul>
+    <li>
+      <strong>بيانات محلية على جهازك:</strong> إعدادات التطبيق، قائمة الحظر المحلية،
+      ذاكرة الفحوصات الأخيرة. تُحذف هذه البيانات تلقائياً وفوراً عند إلغاء تثبيت
+      التطبيق.
+    </li>
+    <li>
+      <strong>بيانات مشفّرة على خوادمنا:</strong> فقط بصمات رقمية (SHA-256 hashes)
+      لأرقام الهواتف وبصمات SimHash للقوالب الاحتيالية. لا نخزن أبداً النص الخام
+      لأي رسالة أو صورة.
+    </li>
+  </ul>
+
+  <h2>2. كيف تطلب الحذف</h2>
+
+  <h3>الخطوة 1: حذف البيانات المحلية</h3>
+  <div class="step">
+    <p>قم بإلغاء تثبيت التطبيق من جهاز Android:</p>
+    <ol>
+      <li>اضغط مطوّلاً على أيقونة "شيّكلي" في القائمة الرئيسية.</li>
+      <li>اختر "إلغاء التثبيت" أو اسحب الأيقونة إلى "إزالة".</li>
+      <li>عند انتهاء الإزالة، تكون جميع بياناتك المحلية قد حُذفت بالكامل.</li>
+    </ol>
+  </div>
+
+  <h3>الخطوة 2: طلب حذف البيانات على الخوادم</h3>
+  <div class="step">
+    <p>راسلنا على البريد الإلكتروني التالي:</p>
+    <p><a href="mailto:ibraheemtamim42@gmail.com?subject=Data%20Deletion%20Request%20%E2%80%94%20%D8%B4%D9%8A%D9%91%D9%83%D9%84%D9%8A">
+      <strong>ibraheemtamim42@gmail.com</strong>
+    </a></p>
+    <p>اذكر في رسالتك:</p>
+    <ul>
+      <li>عنوان الرسالة: "طلب حذف البيانات — شيّكلي" أو "Data Deletion Request — Shayekli"</li>
+      <li>رقم الهاتف الذي تريد حذف البصمات المرتبطة به</li>
+      <li>أي معلومات إضافية تساعدنا على تحديد بياناتك</li>
+    </ul>
+    <p>سنرد على طلبك خلال 30 يوماً، ونؤكد لك حذف بياناتك على الخوادم.</p>
+  </div>
+
+  <h2>3. ما الذي يُحذف وما الذي يبقى</h2>
+  <p><strong>سنحذف:</strong></p>
+  <ul>
+    <li>أي بصمة رقمية مرتبطة برقم هاتفك من قاعدة بيانات سمعة المُرسِلين.</li>
+    <li>أي بصمة قالب SimHash مرتبطة بتقاريرك في قاعدة البيانات المجتمعية.</li>
+    <li>أي تقارير فيدباك (Feedback) أرسلتها أنت من تطبيقنا.</li>
+  </ul>
+  <p><strong>ما لا نحتفظ به أصلاً (وبالتالي لا يحتاج إلى حذف):</strong></p>
+  <ul>
+    <li>محتوى أي رسالة قصيرة (SMS) — لا يُحفظ النص الخام أبداً.</li>
+    <li>محتوى أي إشعار من تطبيقات المراسلة — لا يُحفظ النص الخام أبداً.</li>
+    <li>أي صورة قمت بفحصها — تُحذف بعد انتهاء عملية الفحص مباشرة.</li>
+  </ul>
+
+  <h2>4. للأسئلة</h2>
+  <p>
+    إذا كان لديك أي سؤال حول هذه العملية، تواصل معنا على
+    <a href="mailto:ibraheemtamim42@gmail.com">ibraheemtamim42@gmail.com</a>.
+  </p>
+  <p>
+    للمزيد عن جمع البيانات واستخدامها، يرجى مراجعة
+    <a href="/privacy">سياسة الخصوصية الكاملة</a>.
+  </p>
+</section>
+
+<hr>
+
+<!-- ============================================================== -->
+<!-- ENGLISH VERSION                                                  -->
+<!-- ============================================================== -->
+<section class="lang-en" dir="ltr" lang="en">
+  <h1>Request Data Deletion — Shayekli</h1>
+  <p class="meta">Last updated: May 12, 2026</p>
+
+  <p>
+    If you have used <strong>Shayekli (شيّكلي)</strong> and would like any of your
+    data deleted, this page explains the full process.
+  </p>
+
+  <h2>1. What data we hold</h2>
+  <p>Shayekli stores two categories of data:</p>
+  <ul>
+    <li>
+      <strong>On-device data:</strong> app settings, local URL blocklist, recent
+      scan history. This data is automatically and immediately deleted when you
+      uninstall the app.
+    </li>
+    <li>
+      <strong>Hashed server-side data:</strong> only SHA-256 hashes of phone
+      numbers, and SimHash fingerprints of scam-message templates. We never
+      store the raw text of any message, the raw value of any phone number, or
+      any photo.
+    </li>
+  </ul>
+
+  <h2>2. How to request deletion</h2>
+
+  <h3>Step 1: Delete on-device data</h3>
+  <div class="step">
+    <p>Uninstall the app from your Android device:</p>
+    <ol>
+      <li>Long-press the "Shayekli" icon on your home screen or app drawer.</li>
+      <li>Tap "Uninstall" or drag the icon to "Remove".</li>
+      <li>When the uninstall completes, all your local data is permanently deleted.</li>
+    </ol>
+  </div>
+
+  <h3>Step 2: Request server-side data deletion</h3>
+  <div class="step">
+    <p>Email us at:</p>
+    <p><a href="mailto:ibraheemtamim42@gmail.com?subject=Data%20Deletion%20Request%20%E2%80%94%20Shayekli">
+      <strong>ibraheemtamim42@gmail.com</strong>
+    </a></p>
+    <p>Include in your email:</p>
+    <ul>
+      <li>Subject line: "Data Deletion Request — Shayekli"</li>
+      <li>The phone number(s) whose hashes you want removed</li>
+      <li>Any additional information that helps us identify your data</li>
+    </ul>
+    <p>We will respond within 30 days and confirm that your server-side data has been deleted.</p>
+  </div>
+
+  <h2>3. What gets deleted vs. what was never kept</h2>
+  <p><strong>What we will delete:</strong></p>
+  <ul>
+    <li>Any SHA-256 hash of your phone number stored in the sender-reputation database.</li>
+    <li>Any SimHash template fingerprint associated with reports you submitted from your device.</li>
+    <li>Any feedback rows you submitted via the in-app feedback buttons.</li>
+  </ul>
+  <p><strong>What we never store in the first place (so there is nothing to delete):</strong></p>
+  <ul>
+    <li>The text of any SMS message — never stored as raw text.</li>
+    <li>The text of any notification from messaging apps — never stored as raw text.</li>
+    <li>Any photo you scanned — discarded immediately after scan completes.</li>
+  </ul>
+
+  <h2>4. Questions</h2>
+  <p>
+    For any question about this process, contact us at
+    <a href="mailto:ibraheemtamim42@gmail.com">ibraheemtamim42@gmail.com</a>.
+  </p>
+  <p>
+    For full details on what data is collected and how it is used, please read our
+    <a href="/privacy">complete privacy policy</a>.
+  </p>
+</section>
+
+</body>
+</html>

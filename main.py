@@ -105,7 +105,7 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 #   1. JSON request log + latency metrics (always on)
 #   2. API key gate (only if BACKEND_API_KEY is set)
 observability.request_logging_middleware(app)
-auth.install(app, public_extra=["/privacy"])
+auth.install(app, public_extra=["/privacy", "/privacy/delete"])
 
 # ---------------------------------------------------------------------------
 # Optional Tesseract OCR (will be replaced by Cloud Vision in Part 3).
@@ -564,10 +564,12 @@ def ping():
     return "pong"
 
 
-# Public-facing privacy policy. Required for Google Play Console and App Store
-# listings. Exempt from the X-API-Key gate via auth.install(public_extra=...).
-# The HTML file is bilingual (Arabic primary, English secondary).
+# Public-facing privacy + data-deletion pages. Required for Google Play Console
+# and App Store listings. Exempt from the X-API-Key gate via
+# auth.install(public_extra=...). Both HTML files are bilingual (Arabic primary,
+# English secondary).
 _PRIVACY_HTML_PATH = Path(__file__).parent / "privacy.html"
+_DELETE_HTML_PATH = Path(__file__).parent / "delete_data.html"
 
 
 @app.get("/privacy", response_class=HTMLResponse)
@@ -575,11 +577,23 @@ def privacy_policy():
     try:
         return _PRIVACY_HTML_PATH.read_text(encoding="utf-8")
     except FileNotFoundError:
-        # Defensive: shouldn't happen in production since privacy.html is
-        # checked in, but fail loud rather than serving a blank 200.
         return HTMLResponse(
             status_code=503,
             content="<h1>Privacy policy temporarily unavailable</h1>",
+        )
+
+
+@app.get("/privacy/delete", response_class=HTMLResponse)
+def delete_data_page():
+    """Data deletion request page. Google Play Console requires a dedicated
+    URL (separate from the general privacy policy) that explains how users
+    can request deletion of their data."""
+    try:
+        return _DELETE_HTML_PATH.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return HTMLResponse(
+            status_code=503,
+            content="<h1>Data deletion page temporarily unavailable</h1>",
         )
 
 
